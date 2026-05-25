@@ -75,6 +75,92 @@ describe("DashboardOverviewSchema", () => {
 
     expect(parsed.accounts).toHaveLength(0);
     expect(parsed.summary.comparison?.previous.requests).toBe(250);
+    expect(parsed.apiKeyAttribution).toBeNull();
+  });
+
+  it("parses per-window API key account attribution", () => {
+    const parsed = DashboardOverviewSchema.parse({
+      lastSyncAt: ISO,
+      timeframe: {
+        key: "7d",
+        windowMinutes: 10080,
+        bucketSeconds: 21600,
+        bucketCount: 28,
+      },
+      accounts: [],
+      summary: {
+        primaryWindow: {
+          remainingPercent: 80,
+          capacityCredits: 100,
+          remainingCredits: 80,
+          resetAt: ISO,
+          windowMinutes: 300,
+        },
+        secondaryWindow: null,
+        cost: {
+          currency: "USD",
+          totalUsd: 12.5,
+        },
+        metrics: null,
+      },
+      windows: {
+        primary: {
+          windowKey: "primary",
+          windowMinutes: 300,
+          accounts: [],
+        },
+        secondary: null,
+      },
+      trends: EMPTY_TRENDS,
+      apiKeyAttribution: {
+        primary: {
+          windowKey: "primary",
+          windowMinutes: 300,
+          totalEstimatedUsedCredits: 40,
+          entries: [
+            {
+              bucket: "api_key",
+              accountId: "acc-1",
+              accountEmail: "one@example.com",
+              accountDisplayLabel: "One",
+              apiKeyId: "key-1",
+              apiKeyName: "Production",
+              keyPrefix: "sk-prod",
+              requestCount: 10,
+              totalTokens: 2000,
+              cachedInputTokens: 300,
+              totalCostUsd: 0.32,
+              estimatedCredits: 24,
+              attributionSharePercent: 60,
+              isAttributionEstimated: true,
+            },
+          ],
+        },
+        secondary: {
+          windowKey: "secondary",
+          windowMinutes: 10080,
+          totalEstimatedUsedCredits: 16,
+          entries: [
+            {
+              bucket: "unattributed",
+              accountId: "acc-1",
+              requestCount: 2,
+              totalTokens: 100,
+              cachedInputTokens: 0,
+              totalCostUsd: 0.1,
+              estimatedCredits: 16,
+              attributionSharePercent: 40,
+            },
+          ],
+        },
+      },
+    });
+
+    expect(parsed.apiKeyAttribution?.primary.entries[0]?.apiKeyName).toBe("Production");
+    expect(parsed.apiKeyAttribution?.primary.entries[0]?.isAttributionEstimated).toBe(true);
+    expect(parsed.apiKeyAttribution?.secondary?.entries[0]?.bucket).toBe("unattributed");
+    expect(parsed.apiKeyAttribution?.secondary?.entries[0]?.apiKeyId).toBeNull();
+    expect(parsed.apiKeyAttribution?.secondary?.entries[0]?.keyPrefix).toBeNull();
   });
 
   it("drops legacy request_logs field from parse result", () => {

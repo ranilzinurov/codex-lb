@@ -8,7 +8,7 @@ import pytest
 
 from app.core.crypto import TokenEncryptor
 from app.core.utils.time import naive_utc_to_epoch, utcnow
-from app.db.models import Account, AccountStatus
+from app.db.models import Account, AccountStatus, RequestLog
 from app.db.session import SessionLocal
 from app.modules.accounts.repository import AccountsRepository
 from app.modules.accounts.schemas import AccountSummary
@@ -147,6 +147,133 @@ async def test_dashboard_overview_combines_data(async_client, db_setup):
     # At least one trend point should have non-zero request count
     request_values = [p["v"] for p in trends["requests"]]
     assert any(v > 0 for v in request_values)
+
+
+@pytest.mark.asyncio
+async def test_dashboard_overview_includes_estimated_api_key_attribution(async_client, db_setup):
+    now = utcnow().replace(microsecond=0)
+
+    create_key = await async_client.post("/api/api-keys/", json={"name": "attributed-key"})
+    assert create_key.status_code == 200
+    key_id = create_key.json()["id"]
+
+    async with SessionLocal() as session:
+        accounts_repo = AccountsRepository(session)
+        usage_repo = UsageRepository(session)
+
+        await accounts_repo.upsert(_make_account("acc_attr", "attr@example.com"))
+        await accounts_repo.upsert(_make_account("acc_attr_other", "attr-other@example.com"))
+        await usage_repo.add_entry(
+            "acc_attr",
+            20.0,
+            window="primary",
+            window_minutes=300,
+            recorded_at=now - timedelta(minutes=1),
+        )
+        await usage_repo.add_entry(
+            "acc_attr_other",
+            20.0,
+            window="primary",
+            window_minutes=300,
+            recorded_at=now - timedelta(minutes=1),
+        )
+        session.add_all(
+            [
+                RequestLog(
+                    account_id="acc_attr",
+                    api_key_id=key_id,
+                    request_id="req_attr_key",
+                    model="gpt-5.1",
+                    status="success",
+                    requested_at=now - timedelta(minutes=2),
+                    input_tokens=100,
+                    output_tokens=20,
+                    cached_input_tokens=10,
+                    cost_usd=0.25,
+                ),
+                RequestLog(
+                    account_id="acc_attr",
+                    api_key_id=None,
+                    request_id="req_attr_no_key",
+                    model="gpt-5.1",
+                    status="success",
+                    requested_at=now - timedelta(minutes=2),
+                    input_tokens=30,
+                    output_tokens=10,
+                    cached_input_tokens=0,
+                    cost_usd=0.75,
+                ),
+            ]
+        )
+        await session.commit()
+
+    response = await async_client.get("/api/dashboard/overview")
+    assert response.status_code == 200
+    payload = response.json()
+
+    attribution = payload["apiKeyAttribution"]["primary"]
+    assert attribution["windowKey"] == "primary"
+    assert attribution["windowMinutes"] == 300
+    assert attribution["totalEstimatedUsedCredits"] == pytest.approx(90.0)
+
+    entries = {
+        (entry["accountId"], entry["bucket"], entry["apiKeyId"]): entry for entry in attribution["entries"]
+    }
+    key_entry = entries[("acc_attr", "api_key", key_id)]
+    assert key_entry["accountId"] == "acc_attr"
+    assert key_entry["accountEmail"] == "attr@example.com"
+    assert key_entry["apiKeyName"] == "attributed-key"
+    assert key_entry["requestCount"] == 1
+    assert key_entry["totalTokens"] == 120
+    assert key_entry["cachedInputTokens"] == 10
+    assert key_entry["totalCostUsd"] == pytest.approx(0.25)
+    assert key_entry["estimatedCredits"] == pytest.approx(11.25)
+    assert key_entry["attributionSharePercent"] == pytest.approx(25.0)
+    assert key_entry["isAttributionEstimated"] is True
+
+    unattributed = entries[("acc_attr", "unattributed", None)]
+    assert unattributed["requestCount"] == 1
+    assert unattributed["totalTokens"] == 40
+    assert unattributed["totalCostUsd"] == pytest.approx(0.75)
+    assert unattributed["estimatedCredits"] == pytest.approx(33.75)
+    assert unattributed["attributionSharePercent"] == pytest.approx(75.0)
+
+    other_unattributed = entries[("acc_attr_other", "unattributed", None)]
+    assert other_unattributed["requestCount"] == 0
+    assert other_unattributed["estimatedCredits"] == pytest.approx(45.0)
+    assert other_unattributed["attributionSharePercent"] == pytest.approx(100.0)
+
+
+@pytest.mark.asyncio
+async def test_dashboard_overview_attribution_marks_missing_logs_unattributed(async_client, db_setup):
+    now = utcnow().replace(microsecond=0)
+
+    async with SessionLocal() as session:
+        accounts_repo = AccountsRepository(session)
+        usage_repo = UsageRepository(session)
+
+        await accounts_repo.upsert(_make_account("acc_attr_missing", "attr-missing@example.com"))
+        await usage_repo.add_entry(
+            "acc_attr_missing",
+            20.0,
+            window="primary",
+            window_minutes=300,
+            recorded_at=now - timedelta(minutes=1),
+        )
+
+    response = await async_client.get("/api/dashboard/overview")
+    assert response.status_code == 200
+    payload = response.json()
+
+    attribution = payload["apiKeyAttribution"]["primary"]
+    [entry] = attribution["entries"]
+    assert entry["bucket"] == "unattributed"
+    assert entry["accountId"] == "acc_attr_missing"
+    assert entry["requestCount"] == 0
+    assert entry["totalTokens"] == 0
+    assert entry["totalCostUsd"] == pytest.approx(0.0)
+    assert entry["estimatedCredits"] == pytest.approx(45.0)
+    assert entry["attributionSharePercent"] == pytest.approx(100.0)
 
 
 @pytest.mark.asyncio

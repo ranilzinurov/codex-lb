@@ -10,6 +10,7 @@ import { ResetCreditConfirmDialog } from "@/features/accounts/components/reset-c
 import { AccountCards } from "@/features/dashboard/components/account-cards";
 import { AccountList } from "@/features/dashboard/components/account-list";
 import { AccountSummaryLine } from "@/features/dashboard/components/account-summary-line";
+import { AccountUsageAttribution } from "@/features/dashboard/components/account-usage-attribution";
 import { AccountViewModeToggle } from "@/features/dashboard/components/account-view-mode-toggle";
 import { DashboardSkeleton } from "@/features/dashboard/components/dashboard-skeleton";
 import { OverviewTimeframeSelect } from "@/features/dashboard/components/filters/overview-timeframe-select";
@@ -238,6 +239,11 @@ export function DashboardPage() {
               safeLineSecondary={view.safeLineSecondary}
             />
           )}
+
+          <AccountUsageAttribution
+            primaryWindow={overview?.apiKeyAttribution?.primary ?? null}
+            secondaryWindow={overview?.apiKeyAttribution?.secondary ?? null}
+          />
 
           <section className="space-y-4">
             <div className="flex flex-wrap items-center gap-3">

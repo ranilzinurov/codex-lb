@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Literal
 
 from app.core import usage as usage_core
 from app.core.config.settings import get_settings
 from app.core.crypto import TokenEncryptor
 from app.core.usage.types import UsageWindowRow
 from app.core.utils.time import utcnow
-from app.db.models import UsageHistory
+from app.db.models import Account, UsageHistory
 from app.modules.accounts.mappers import build_account_summaries
 from app.modules.dashboard.builders import (
     build_dashboard_overview_summary,
@@ -16,6 +19,10 @@ from app.modules.dashboard.builders import (
 )
 from app.modules.dashboard.repository import DashboardRepository
 from app.modules.dashboard.schemas import (
+    DashboardApiKeyAttributionBucket,
+    DashboardApiKeyUsageAttribution,
+    DashboardApiKeyUsageAttributionEntry,
+    DashboardApiKeyUsageAttributionWindow,
     DashboardMetricsComparison,
     DashboardMetricsComparisonPrevious,
     DashboardOverviewResponse,
@@ -25,6 +32,7 @@ from app.modules.dashboard.schemas import (
     DepletionResponse,
 )
 from app.modules.dashboard.weekly_pace import build_weekly_credit_pace
+from app.modules.request_logs.repository import ApiKeyAccountUsageAggregate
 from app.modules.usage.builders import (
     align_bucket_window_start,
     build_activity_summaries,
@@ -151,6 +159,12 @@ class DashboardService:
                 accounts=accounts,
             ),
         )
+        api_key_attribution = await self._build_api_key_attribution(
+            accounts=accounts,
+            primary_rows=primary_rows,
+            secondary_rows=secondary_rows,
+            now=now,
+        )
 
         additional_ts = await self._repo.latest_additional_recorded_at()
         return DashboardOverviewResponse(
@@ -160,6 +174,7 @@ class DashboardService:
             summary=summary,
             windows=windows,
             trends=trends,
+            api_key_attribution=api_key_attribution,
         )
 
     async def get_projections(self) -> DashboardProjectionsResponse:
@@ -198,6 +213,63 @@ class DashboardService:
             depletion_primary=pri_depletion,
             depletion_secondary=sec_depletion,
             weekly_credit_pace=weekly_credit_pace,
+        )
+
+    async def _build_api_key_attribution(
+        self,
+        *,
+        accounts: list[Account],
+        primary_rows: list[UsageWindowRow],
+        secondary_rows: list[UsageWindowRow],
+        now: datetime,
+    ) -> DashboardApiKeyUsageAttribution:
+        primary = await self._build_api_key_attribution_window(
+            window_key="primary",
+            accounts=accounts,
+            usage_rows=primary_rows,
+            now=now,
+        )
+        secondary = await self._build_api_key_attribution_window(
+            window_key="secondary",
+            accounts=accounts,
+            usage_rows=secondary_rows,
+            now=now,
+        )
+        return DashboardApiKeyUsageAttribution(primary=primary, secondary=secondary)
+
+    async def _build_api_key_attribution_window(
+        self,
+        *,
+        window_key: str,
+        accounts: list[Account],
+        usage_rows: list[UsageWindowRow],
+        now: datetime,
+    ) -> DashboardApiKeyUsageAttributionWindow:
+        account_by_id = {account.id: account for account in accounts}
+        usage_by_account_id = {row.account_id: row for row in usage_rows if row.account_id in account_by_id}
+        window_minutes = usage_core.resolve_window_minutes(window_key, usage_rows)
+        since_by_account_id = _attribution_since_by_account_id(
+            usage_by_account_id,
+            window_key=window_key,
+            now=now,
+        )
+        aggregates = await self._repo.aggregate_api_key_account_usage(since_by_account_id)
+
+        entries = _build_api_key_attribution_entries(
+            window_key=window_key,
+            account_by_id=account_by_id,
+            usage_by_account_id=usage_by_account_id,
+            aggregates=aggregates,
+        )
+        total_estimated_used_credits = round(
+            sum(_used_credits_for_row(row, account_by_id, window_key) for row in usage_by_account_id.values()),
+            6,
+        )
+        return DashboardApiKeyUsageAttributionWindow(
+            window_key=_dashboard_attribution_window_key(window_key),
+            window_minutes=window_minutes,
+            total_estimated_used_credits=total_estimated_used_credits,
+            entries=entries,
         )
 
 
@@ -376,3 +448,171 @@ def _latest_recorded_at(
     if additional_ts is not None:
         timestamps.append(additional_ts)
     return max(timestamps) if timestamps else None
+
+
+def _attribution_since_by_account_id(
+    usage_by_account_id: dict[str, UsageWindowRow],
+    *,
+    window_key: str,
+    now: datetime,
+) -> dict[str, datetime]:
+    since_by_account_id: dict[str, datetime] = {}
+    default_minutes = usage_core.default_window_minutes(window_key)
+    for account_id, row in usage_by_account_id.items():
+        window_minutes = row.window_minutes or default_minutes
+        if window_minutes is None or window_minutes <= 0:
+            continue
+        since_by_account_id[account_id] = now - timedelta(minutes=window_minutes)
+    return since_by_account_id
+
+
+def _build_api_key_attribution_entries(
+    *,
+    window_key: str,
+    account_by_id: dict[str, Account],
+    usage_by_account_id: dict[str, UsageWindowRow],
+    aggregates: list[ApiKeyAccountUsageAggregate],
+) -> list[DashboardApiKeyUsageAttributionEntry]:
+    aggregates_by_account_id: dict[str, list[ApiKeyAccountUsageAggregate]] = defaultdict(list)
+    for row in aggregates:
+        aggregates_by_account_id[row.account_id].append(row)
+
+    entries: list[DashboardApiKeyUsageAttributionEntry] = []
+    for account_id, usage_row in usage_by_account_id.items():
+        account = account_by_id.get(account_id)
+        if account is None:
+            continue
+        account_used_credits = _used_credits_for_row(usage_row, account_by_id, window_key)
+        account_aggregates = aggregates_by_account_id.get(account_id, [])
+        account_denominator = _account_attribution_denominator(account_aggregates)
+        account_attributed_credits = 0.0
+
+        for row in account_aggregates:
+            if row.api_key_id is None:
+                continue
+            metric = _attribution_metric(row, account_denominator.metric)
+            estimated_credits = account_used_credits * (metric / account_denominator.value)
+            account_attributed_credits += estimated_credits
+            entries.append(
+                _api_key_attribution_entry(
+                    bucket="api_key",
+                    account_id=account_id,
+                    account_email=account.email,
+                    api_key_id=row.api_key_id,
+                    api_key_name=row.api_key_name or row.api_key_id,
+                    key_prefix=row.api_key_prefix,
+                    request_count=row.request_count,
+                    total_tokens=row.total_tokens,
+                    cached_input_tokens=row.cached_input_tokens,
+                    total_cost_usd=row.total_cost_usd,
+                    estimated_credits=estimated_credits,
+                    share_denominator_credits=account_used_credits,
+                )
+            )
+
+        unattributed_credits = max(0.0, account_used_credits - account_attributed_credits)
+        unattributed_logs = [row for row in account_aggregates if row.api_key_id is None]
+        if unattributed_credits > 0 or unattributed_logs:
+            entries.append(
+                _api_key_attribution_entry(
+                    bucket="unattributed",
+                    account_id=account_id,
+                    account_email=account.email,
+                    api_key_id=None,
+                    api_key_name=None,
+                    key_prefix=None,
+                    request_count=sum(row.request_count for row in unattributed_logs),
+                    total_tokens=sum(row.total_tokens for row in unattributed_logs),
+                    cached_input_tokens=sum(row.cached_input_tokens for row in unattributed_logs),
+                    total_cost_usd=round(sum(row.total_cost_usd for row in unattributed_logs), 6),
+                    estimated_credits=unattributed_credits,
+                    share_denominator_credits=account_used_credits,
+                )
+            )
+
+    entries.sort(
+        key=lambda item: (
+            item.account_id,
+            0 if item.bucket == "api_key" else 1,
+            -(item.estimated_credits),
+            item.api_key_name or "",
+        )
+    )
+    return entries
+
+
+@dataclass(frozen=True, slots=True)
+class _AttributionDenominator:
+    metric: Literal["cost", "tokens", "requests"]
+    value: float
+
+
+def _account_attribution_denominator(rows: list[ApiKeyAccountUsageAggregate]) -> _AttributionDenominator:
+    total_cost = sum(max(0.0, row.total_cost_usd) for row in rows)
+    if total_cost > 0:
+        return _AttributionDenominator(metric="cost", value=total_cost)
+    total_tokens = sum(max(0, row.total_tokens) for row in rows)
+    if total_tokens > 0:
+        return _AttributionDenominator(metric="tokens", value=float(total_tokens))
+    total_requests = sum(max(0, row.request_count) for row in rows)
+    return _AttributionDenominator(metric="requests", value=float(total_requests or 1))
+
+
+def _attribution_metric(row: ApiKeyAccountUsageAggregate, metric: str) -> float:
+    if metric == "cost":
+        return max(0.0, row.total_cost_usd)
+    if metric == "tokens":
+        return float(max(0, row.total_tokens))
+    return float(max(0, row.request_count))
+
+
+def _used_credits_for_row(
+    row: UsageWindowRow,
+    account_by_id: dict[str, Account],
+    window_key: str,
+) -> float:
+    account = account_by_id.get(row.account_id)
+    capacity = usage_core.capacity_for_plan(account.plan_type if account else None, window_key)
+    used_credits = usage_core.used_credits_from_percent(row.used_percent, capacity)
+    return float(used_credits or 0.0)
+
+
+def _api_key_attribution_entry(
+    *,
+    bucket: DashboardApiKeyAttributionBucket,
+    account_id: str,
+    account_email: str | None,
+    api_key_id: str | None,
+    api_key_name: str | None,
+    key_prefix: str | None,
+    request_count: int,
+    total_tokens: int,
+    cached_input_tokens: int,
+    total_cost_usd: float,
+    estimated_credits: float,
+    share_denominator_credits: float,
+) -> DashboardApiKeyUsageAttributionEntry:
+    share_percent = 0.0
+    if share_denominator_credits > 0:
+        share_percent = (estimated_credits / share_denominator_credits) * 100.0
+    return DashboardApiKeyUsageAttributionEntry(
+        bucket=bucket,
+        account_id=account_id,
+        account_email=account_email,
+        api_key_id=api_key_id,
+        api_key_name=api_key_name,
+        key_prefix=key_prefix,
+        request_count=request_count,
+        total_tokens=total_tokens,
+        cached_input_tokens=cached_input_tokens,
+        total_cost_usd=round(total_cost_usd, 6),
+        estimated_credits=round(estimated_credits, 6),
+        attribution_share_percent=round(share_percent, 6),
+        is_attribution_estimated=True,
+    )
+
+
+def _dashboard_attribution_window_key(window_key: str) -> Literal["primary", "secondary"]:
+    if window_key == "primary":
+        return "primary"
+    return "secondary"
