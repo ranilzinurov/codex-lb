@@ -18,6 +18,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Switch } from "@/components/ui/switch";
 import type { ApiKey, LimitRule, LimitType } from "@/features/api-keys/schemas";
 import { formatCompactNumber, formatCurrency, formatTimeLong } from "@/utils/formatters";
 
@@ -96,9 +97,17 @@ export type ApiKeyTableProps = {
   onEdit: (apiKey: ApiKey) => void;
   onDelete: (apiKey: ApiKey) => void;
   onRegenerate: (apiKey: ApiKey) => void;
+  onToggleShowOnDashboard?: (apiKey: ApiKey) => void;
 };
 
-export function ApiKeyTable({ keys, busy, onEdit, onDelete, onRegenerate }: ApiKeyTableProps) {
+export function ApiKeyTable({
+  keys,
+  busy,
+  onEdit,
+  onDelete,
+  onRegenerate,
+  onToggleShowOnDashboard,
+}: ApiKeyTableProps) {
   if (keys.length === 0) {
     return <EmptyState icon={KeyRound} title="No API keys created yet" />;
   }
@@ -108,7 +117,7 @@ export function ApiKeyTable({ keys, busy, onEdit, onDelete, onRegenerate }: ApiK
     <Table className="table-fixed">
       <TableHeader>
         <TableRow>
-          <TableHead className="w-[20%] min-w-[12rem] pl-4 text-[11px] uppercase tracking-wider text-muted-foreground/80">Name</TableHead>
+          <TableHead className="w-[18%] min-w-[12rem] pl-4 text-[11px] uppercase tracking-wider text-muted-foreground/80">Name</TableHead>
           <TableHead className="w-[10%] min-w-[8rem] text-[11px] uppercase tracking-wider text-muted-foreground/80">Prefix</TableHead>
           <TableHead className="w-[9%] min-w-[6.5rem] text-[11px] uppercase tracking-wider text-muted-foreground/80">Models</TableHead>
           <TableHead className="w-[9%] min-w-[6.5rem] text-[11px] uppercase tracking-wider text-muted-foreground/80">Traffic</TableHead>
@@ -116,6 +125,7 @@ export function ApiKeyTable({ keys, busy, onEdit, onDelete, onRegenerate }: ApiK
           <TableHead className="w-[14%] min-w-[12rem] text-[11px] uppercase tracking-wider text-muted-foreground/80">Limit</TableHead>
           <TableHead className="w-[8%] min-w-[7rem] text-[11px] uppercase tracking-wider text-muted-foreground/80">Expiry</TableHead>
           <TableHead className="w-[7%] min-w-[5.5rem] text-[11px] uppercase tracking-wider text-muted-foreground/80">Status</TableHead>
+          <TableHead className="w-[7%] min-w-[7rem] text-[11px] uppercase tracking-wider text-muted-foreground/80">Dashboard</TableHead>
           <TableHead className="w-[6%] min-w-[4.5rem] pr-4 text-right text-[11px] uppercase tracking-wider text-muted-foreground/80">Actions</TableHead>
         </TableRow>
       </TableHeader>
@@ -137,6 +147,20 @@ export function ApiKeyTable({ keys, busy, onEdit, onDelete, onRegenerate }: ApiK
                 <Badge className={apiKey.isActive ? "bg-emerald-500 text-white" : "bg-zinc-500 text-white"}>
                   {apiKey.isActive ? "Active" : "Disabled"}
                 </Badge>
+              </TableCell>
+              <TableCell>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    size="sm"
+                    aria-label={`Show ${apiKey.name} on dashboard`}
+                    checked={apiKey.showOnDashboard}
+                    disabled={busy || !onToggleShowOnDashboard}
+                    onCheckedChange={() => onToggleShowOnDashboard?.(apiKey)}
+                  />
+                  <span className="text-xs text-muted-foreground">
+                    {apiKey.showOnDashboard ? "Shown" : "Hidden"}
+                  </span>
+                </div>
               </TableCell>
               <TableCell className="pr-4 text-right">
                 <DropdownMenu>

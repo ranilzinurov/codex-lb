@@ -488,7 +488,7 @@ def _build_api_key_attribution_entries(
         account_attributed_credits = 0.0
 
         for row in account_aggregates:
-            if row.api_key_id is None:
+            if row.api_key_id is None or not row.api_key_show_on_dashboard:
                 continue
             metric = _attribution_metric(row, account_denominator.metric)
             estimated_credits = account_used_credits * (metric / account_denominator.value)
@@ -511,7 +511,9 @@ def _build_api_key_attribution_entries(
             )
 
         unattributed_credits = max(0.0, account_used_credits - account_attributed_credits)
-        unattributed_logs = [row for row in account_aggregates if row.api_key_id is None]
+        unattributed_logs = [
+            row for row in account_aggregates if row.api_key_id is None or not row.api_key_show_on_dashboard
+        ]
         if unattributed_credits > 0 or unattributed_logs:
             entries.append(
                 _api_key_attribution_entry(

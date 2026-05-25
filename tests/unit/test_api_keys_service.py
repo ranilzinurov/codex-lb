@@ -144,6 +144,7 @@ class _FakeApiKeysRepository(ApiKeysRepositoryProtocol):
         name: str | _Unset = _UNSET,
         allowed_models: str | None | _Unset = _UNSET,
         apply_to_codex_model: bool | _Unset = _UNSET,
+        show_on_dashboard: bool | _Unset = _UNSET,
         enforced_model: str | None | _Unset = _UNSET,
         enforced_reasoning_effort: str | None | _Unset = _UNSET,
         enforced_service_tier: str | None | _Unset = _UNSET,
@@ -166,6 +167,7 @@ class _FakeApiKeysRepository(ApiKeysRepositoryProtocol):
             "name": name,
             "allowed_models": allowed_models,
             "apply_to_codex_model": apply_to_codex_model,
+            "show_on_dashboard": show_on_dashboard,
             "enforced_model": enforced_model,
             "enforced_reasoning_effort": enforced_reasoning_effort,
             "enforced_service_tier": enforced_service_tier,
@@ -733,6 +735,54 @@ async def test_create_key_persists_apply_to_codex_model_flag() -> None:
     stored = await repo.get_by_id(created.id)
     assert stored is not None
     assert stored.apply_to_codex_model is True
+
+
+@pytest.mark.asyncio
+async def test_create_key_defaults_dashboard_visibility_to_false() -> None:
+    repo = _FakeApiKeysRepository()
+    service = ApiKeysService(repo)
+
+    created = await service.create_key(
+        ApiKeyCreateData(
+            name="private-dashboard-key",
+            allowed_models=None,
+            expires_at=None,
+        )
+    )
+
+    assert created.show_on_dashboard is False
+
+    stored = await repo.get_by_id(created.id)
+    assert stored is not None
+    assert stored.show_on_dashboard is False
+
+
+@pytest.mark.asyncio
+async def test_update_key_persists_dashboard_visibility_flag() -> None:
+    repo = _FakeApiKeysRepository()
+    service = ApiKeysService(repo)
+
+    created = await service.create_key(
+        ApiKeyCreateData(
+            name="dashboard-visible-key",
+            allowed_models=None,
+            expires_at=None,
+        )
+    )
+
+    updated = await service.update_key(
+        created.id,
+        ApiKeyUpdateData(
+            show_on_dashboard=True,
+            show_on_dashboard_set=True,
+        ),
+    )
+
+    assert updated.show_on_dashboard is True
+
+    stored = await repo.get_by_id(created.id)
+    assert stored is not None
+    assert stored.show_on_dashboard is True
 
 
 @pytest.mark.asyncio

@@ -144,8 +144,17 @@ export function ApisPage() {
 							<ApiList
 								apiKeys={apiKeys}
 								selectedKeyId={resolvedSelectedKeyId}
+								busy={mutationBusy}
 								onSelect={handleSelectKey}
 								onOpenCreate={() => createDialog.show()}
+								onToggleDashboard={(apiKey) => {
+									void updateMutation
+										.mutateAsync({
+											keyId: apiKey.id,
+											payload: { showOnDashboard: !apiKey.showOnDashboard },
+										})
+										.catch(() => null);
+								}}
 							/>
 						</div>
 
@@ -162,6 +171,14 @@ export function ApisPage() {
 									.mutateAsync({
 										keyId: apiKey.id,
 										payload: { isActive: !apiKey.isActive },
+									})
+									.catch(() => null);
+							}}
+							onToggleDashboard={(apiKey) => {
+								void updateMutation
+									.mutateAsync({
+										keyId: apiKey.id,
+										payload: { showOnDashboard: !apiKey.showOnDashboard },
 									})
 									.catch(() => null);
 							}}

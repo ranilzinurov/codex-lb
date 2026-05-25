@@ -47,6 +47,7 @@ export type ApiDetailProps = {
 	onDelete: (apiKey: ApiKey) => void;
 	onRegenerate: (apiKey: ApiKey) => void;
 	onToggleActive: (apiKey: ApiKey) => void;
+	onToggleDashboard: (apiKey: ApiKey) => void;
 };
 
 function accumulateData(
@@ -70,6 +71,7 @@ export function ApiDetail({
 	onDelete,
 	onRegenerate,
 	onToggleActive,
+	onToggleDashboard,
 }: ApiDetailProps) {
 	const [showAccumulated, setShowAccumulated] = useState(false);
 
@@ -148,6 +150,23 @@ export function ApiDetail({
 						</DropdownMenuItem>
 					</DropdownMenuContent>
 				</DropdownMenu>
+			</div>
+
+			<div className="flex items-center justify-between gap-3 rounded-lg border bg-muted/30 px-3 py-2">
+				<div className="min-w-0">
+					<p id="api-detail-show-on-dashboard-label" className="text-sm font-medium">
+						Show on dashboard
+					</p>
+					<p className="text-xs text-muted-foreground">
+						Include this key in quota attribution.
+					</p>
+				</div>
+				<Switch
+					aria-labelledby="api-detail-show-on-dashboard-label"
+					checked={apiKey.showOnDashboard}
+					disabled={busy}
+					onCheckedChange={() => onToggleDashboard(apiKey)}
+				/>
 			</div>
 
 			{hasDonutData || hasTrends ? (

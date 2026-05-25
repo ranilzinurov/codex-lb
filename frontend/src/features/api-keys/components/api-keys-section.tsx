@@ -114,6 +114,12 @@ export function ApiKeysSection({
         busy={busy}
         onEdit={(apiKey) => editDialog.show(apiKey)}
         onDelete={(apiKey) => deleteDialog.show(apiKey)}
+        onToggleShowOnDashboard={(apiKey) => {
+          void updateMutation.mutateAsync({
+            keyId: apiKey.id,
+            payload: { showOnDashboard: !apiKey.showOnDashboard },
+          });
+        }}
         onRegenerate={(apiKey) => {
           void regenerateMutation.mutateAsync(apiKey.id).then((result) => {
             createdDialog.show(result.key);

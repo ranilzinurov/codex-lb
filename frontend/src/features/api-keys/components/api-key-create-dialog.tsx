@@ -76,6 +76,7 @@ type ApiKeyCreateDraft = {
   trafficClass: TrafficClass;
   transportPolicyOverride: TransportPolicyOverride | null;
   applyToCodexModel: boolean;
+  showOnDashboard: boolean;
 };
 
 const initialApiKeyCreateDraft: ApiKeyCreateDraft = {
@@ -91,6 +92,7 @@ const initialApiKeyCreateDraft: ApiKeyCreateDraft = {
   trafficClass: "foreground",
   transportPolicyOverride: null,
   applyToCodexModel: false,
+  showOnDashboard: false,
 };
 
 function apiKeyCreateDraftReducer(
@@ -114,6 +116,7 @@ function ApiKeyCreateForm({ busy, onClose, onSubmit }: ApiKeyCreateFormProps) {
       name: values.name,
       allowedModels: draft.selectedModels.length > 0 ? draft.selectedModels : undefined,
       applyToCodexModel: draft.applyToCodexModel,
+      showOnDashboard: draft.showOnDashboard,
       ...(draft.selectedAccountIds.length > 0 ? { assignedAccountIds: draft.selectedAccountIds } : {}),
       ...(draft.selectedSourceIds.length > 0 ? { assignedSourceIds: draft.selectedSourceIds } : {}),
       usageSections: draft.usageSections,
@@ -173,6 +176,17 @@ function ApiKeyCreateForm({ busy, onClose, onSubmit }: ApiKeyCreateFormProps) {
               <label htmlFor="create-api-key-apply-to-codex-model" className="cursor-pointer">
                 Apply to codex /model
               </label>
+            </div>
+
+            <div className="flex items-center justify-between gap-3 rounded-md border p-2">
+              <label htmlFor="create-api-key-show-on-dashboard" className="cursor-pointer text-sm">
+                Show on dashboard
+              </label>
+              <Checkbox
+                id="create-api-key-show-on-dashboard"
+                checked={draft.showOnDashboard}
+                onCheckedChange={(checked) => updateDraft({ showOnDashboard: checked === true })}
+              />
             </div>
 
             <div className="space-y-1">

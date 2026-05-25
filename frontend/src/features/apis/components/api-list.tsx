@@ -18,8 +18,10 @@ const STATUS_FILTER_OPTIONS = ["all", "active", "disabled", "expired"];
 export type ApiListProps = {
   apiKeys: ApiKey[];
   selectedKeyId: string | null;
+  busy?: boolean;
   onSelect: (keyId: string) => void;
   onOpenCreate: () => void;
+  onToggleDashboard: (apiKey: ApiKey) => void;
 };
 
 function isExpired(apiKey: ApiKey): boolean {
@@ -36,7 +38,14 @@ function matchStatus(apiKey: ApiKey, filter: string): boolean {
   return true;
 }
 
-export function ApiList({ apiKeys, selectedKeyId, onSelect, onOpenCreate }: ApiListProps) {
+export function ApiList({
+  apiKeys,
+  selectedKeyId,
+  busy = false,
+  onSelect,
+  onOpenCreate,
+  onToggleDashboard,
+}: ApiListProps) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
 
@@ -95,7 +104,9 @@ export function ApiList({ apiKeys, selectedKeyId, onSelect, onOpenCreate }: ApiL
               key={apiKey.id}
               apiKey={apiKey}
               selected={apiKey.id === selectedKeyId}
+              busy={busy}
               onSelect={onSelect}
+              onToggleDashboard={onToggleDashboard}
             />
           ))
         )}

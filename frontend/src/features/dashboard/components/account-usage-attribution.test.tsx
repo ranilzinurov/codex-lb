@@ -69,13 +69,14 @@ describe("AccountUsageAttribution", () => {
 
     expect(screen.getByTestId("account-usage-attribution")).toBeInTheDocument();
     expect(screen.getByText("API Key Attribution")).toBeInTheDocument();
-    expect(screen.getByText("5-hour usage")).toBeInTheDocument();
-    expect(screen.getByText("Weekly usage")).toBeInTheDocument();
+    expect(screen.getByText("5h current quota")).toBeInTheDocument();
+    expect(screen.getByText("Weekly current quota")).toBeInTheDocument();
     expect(screen.getByText("Production")).toBeInTheDocument();
-    expect(screen.getByText("One Account")).toBeInTheDocument();
+    expect(screen.getAllByText("One Account").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("Unattributed").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("64%")).toBeInTheDocument();
-    expect(screen.getByText("$1.25")).toBeInTheDocument();
+    expect(screen.getByText(/24K tokens/)).toBeInTheDocument();
+    expect(screen.getByText(/\$1.25/)).toBeInTheDocument();
   });
 
   it("marks estimated rows", () => {
@@ -86,6 +87,24 @@ describe("AccountUsageAttribution", () => {
       />,
     );
 
-    expect(screen.getByText("Estimated")).toBeInTheDocument();
+    expect(screen.getByText("est.")).toBeInTheDocument();
+  });
+
+  it("hides when no API keys are opted in", () => {
+    const { container } = render(
+      <AccountUsageAttribution
+        primaryWindow={window("primary", [
+          attribution({
+            bucket: "unattributed",
+            apiKeyId: null,
+            apiKeyName: null,
+            keyPrefix: null,
+          }),
+        ])}
+        secondaryWindow={null}
+      />,
+    );
+
+    expect(container).toBeEmptyDOMElement();
   });
 });

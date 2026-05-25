@@ -19,6 +19,7 @@ describe("ApiKeySchema", () => {
       keyPrefix: "sk-live",
       allowedModels: ["gpt-4.1"],
       applyToCodexModel: true,
+      showOnDashboard: true,
       expiresAt: null,
       isActive: true,
       createdAt: ISO,
@@ -39,6 +40,7 @@ describe("ApiKeySchema", () => {
     expect(parsed.id).toBe("key-1");
     expect(parsed.allowedModels).toEqual(["gpt-4.1"]);
     expect(parsed.applyToCodexModel).toBe(true);
+    expect(parsed.showOnDashboard).toBe(true);
     expect(parsed.limits).toHaveLength(1);
     expect(parsed.limits[0].limitType).toBe("total_tokens");
     expect(parsed.trafficClass).toBe("foreground");
@@ -58,6 +60,7 @@ describe("ApiKeySchema", () => {
 
     expect(parsed.limits).toEqual([]);
     expect(parsed.applyToCodexModel).toBe(false);
+    expect(parsed.showOnDashboard).toBe(false);
     expect(parsed.pooledRemainingPercentPrimary).toBeNull();
     expect(parsed.pooledRemainingPercentSecondary).toBeNull();
     expect(parsed.pooledCapacityCreditsPrimary).toBe(0);
@@ -197,6 +200,15 @@ describe("ApiKeyCreateRequestSchema", () => {
 
     expect(result.success).toBe(false);
   });
+
+  it("accepts dashboard visibility", () => {
+    const parsed = ApiKeyCreateRequestSchema.parse({
+      name: "Dashboard Key",
+      showOnDashboard: true,
+    });
+
+    expect(parsed.showOnDashboard).toBe(true);
+  });
 });
 
 describe("ApiKeyUpdateRequestSchema", () => {
@@ -205,6 +217,7 @@ describe("ApiKeyUpdateRequestSchema", () => {
       name: "Updated Key",
       allowedModels: ["gpt-4.1-mini"],
       applyToCodexModel: true,
+      showOnDashboard: true,
       weeklyTokenLimit: 50000,
       expiresAt: ISO,
       isActive: false,
@@ -213,6 +226,7 @@ describe("ApiKeyUpdateRequestSchema", () => {
 
     expect(parsed.name).toBe("Updated Key");
     expect(parsed.applyToCodexModel).toBe(true);
+    expect(parsed.showOnDashboard).toBe(true);
     expect(parsed.isActive).toBe(false);
     expect(parsed.usageSections).toBe("upstream_limits");
   });

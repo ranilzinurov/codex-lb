@@ -53,6 +53,7 @@ const TRANSPORT_POLICY_LABELS = {
 const formSchema = z.object({
   name: z.string().min(1, "Name is required"),
   isActive: z.boolean(),
+  showOnDashboard: z.boolean(),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -137,6 +138,7 @@ function ApiKeyEditForm({ apiKey, busy, onSubmit, onClose }: ApiKeyEditFormProps
     defaultValues: {
       name: apiKey.name,
       isActive: apiKey.isActive,
+      showOnDashboard: apiKey.showOnDashboard,
     },
   });
 
@@ -169,6 +171,7 @@ function ApiKeyEditForm({ apiKey, busy, onSubmit, onClose }: ApiKeyEditFormProps
       usageSections: draft.usageSections,
       expiresAt: draft.expiresAt?.toISOString() ?? null,
       isActive: values.isActive,
+      showOnDashboard: values.showOnDashboard,
     };
     if (shouldSubmitAssignedAccountIds) {
       payload.assignedAccountIds = draft.selectedAccountIds;
@@ -354,6 +357,23 @@ function ApiKeyEditForm({ apiKey, busy, onSubmit, onClose }: ApiKeyEditFormProps
               <div className="text-sm font-medium">Expiry</div>
               <ExpiryPicker value={draft.expiresAt} onChange={(expiresAt) => updateDraft({ expiresAt })} />
             </div>
+
+            <FormField
+              control={form.control}
+              name="showOnDashboard"
+              render={({ field }) => (
+                <div className="flex items-center justify-between rounded-md border p-2">
+                  <span id="edit-api-key-show-on-dashboard-label" className="text-sm">
+                    Show on dashboard
+                  </span>
+                  <Switch
+                    aria-labelledby="edit-api-key-show-on-dashboard-label"
+                    checked={field.value}
+                    onCheckedChange={field.onChange}
+                  />
+                </div>
+              )}
+            />
 
             <FormField
               control={form.control}
