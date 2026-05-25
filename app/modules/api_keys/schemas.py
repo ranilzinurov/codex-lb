@@ -28,6 +28,7 @@ class ApiKeyCreateRequest(DashboardModel):
     name: str = Field(min_length=1, max_length=128)
     allowed_models: list[str] | None = None
     apply_to_codex_model: bool = False
+    show_on_dashboard: bool = False
     enforced_model: str | None = Field(default=None, min_length=1)
     enforced_reasoning_effort: str | None = Field(default=None, pattern=r"(?i)^(none|minimal|low|medium|high|xhigh)$")
     enforced_service_tier: str | None = Field(default=None, pattern=r"(?i)^(auto|default|priority|flex|fast)$")
@@ -41,6 +42,7 @@ class ApiKeyUpdateRequest(DashboardModel):
     name: str | None = Field(default=None, min_length=1, max_length=128)
     allowed_models: list[str] | None = None
     apply_to_codex_model: bool | None = None
+    show_on_dashboard: bool | None = None
     enforced_model: str | None = Field(default=None, min_length=1)
     enforced_reasoning_effort: str | None = Field(default=None, pattern=r"(?i)^(none|minimal|low|medium|high|xhigh)$")
     enforced_service_tier: str | None = Field(default=None, pattern=r"(?i)^(auto|default|priority|flex|fast)$")
@@ -65,6 +67,7 @@ class ApiKeyResponse(DashboardModel):
     key_prefix: str
     allowed_models: list[str] | None
     apply_to_codex_model: bool = False
+    show_on_dashboard: bool = False
     enforced_model: str | None
     enforced_reasoning_effort: str | None
     enforced_service_tier: str | None

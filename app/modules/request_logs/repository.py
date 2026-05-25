@@ -32,6 +32,7 @@ class ApiKeyAccountUsageAggregate:
     api_key_id: str | None
     api_key_name: str | None
     api_key_prefix: str | None
+    api_key_show_on_dashboard: bool
     request_count: int
     total_tokens: int
     cached_input_tokens: int
@@ -195,6 +196,7 @@ class RequestLogsRepository:
                 RequestLog.api_key_id,
                 ApiKey.name.label("api_key_name"),
                 ApiKey.key_prefix.label("api_key_prefix"),
+                ApiKey.show_on_dashboard.label("api_key_show_on_dashboard"),
                 func.count(RequestLog.id).label("request_count"),
                 func.coalesce(func.sum(RequestLog.input_tokens), 0).label("input_tokens"),
                 func.coalesce(
@@ -206,7 +208,13 @@ class RequestLogsRepository:
             )
             .outerjoin(ApiKey, ApiKey.id == RequestLog.api_key_id)
             .where(or_(*account_window_conditions), _normal_traffic_clause())
-            .group_by(RequestLog.account_id, RequestLog.api_key_id, ApiKey.name, ApiKey.key_prefix)
+            .group_by(
+                RequestLog.account_id,
+                RequestLog.api_key_id,
+                ApiKey.name,
+                ApiKey.key_prefix,
+                ApiKey.show_on_dashboard,
+            )
         )
         result = await self._session.execute(stmt)
         aggregates: list[ApiKeyAccountUsageAggregate] = []
@@ -222,6 +230,7 @@ class RequestLogsRepository:
                     api_key_id=row.api_key_id,
                     api_key_name=row.api_key_name,
                     api_key_prefix=row.api_key_prefix,
+                    api_key_show_on_dashboard=bool(row.api_key_show_on_dashboard),
                     request_count=int(row.request_count or 0),
                     total_tokens=input_tokens + output_tokens,
                     cached_input_tokens=cached_input_tokens,

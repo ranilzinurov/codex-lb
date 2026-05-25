@@ -2,7 +2,7 @@
 
 ### Requirement: Dashboard shows per-API-key account-window attribution
 
-The dashboard SHALL render account-window API-key attribution in the same visual language as account quota bars and API-key usage sections. The UI MUST make clear that rows are estimated from local request logs and MUST distinguish named API keys from unattributed usage.
+The dashboard SHALL render account-window API-key attribution in the same visual language as account quota bars and API-key usage sections. The UI MUST use a compact breakdown that shows only API keys opted into dashboard visibility, makes clear that rows are estimated from local request logs, and distinguishes named API keys from unattributed usage.
 
 #### Scenario: Account card exposes key attribution for quota windows
 - **WHEN** an account has attribution rows for its 5h or weekly quota window
@@ -16,3 +16,18 @@ The dashboard SHALL render account-window API-key attribution in the same visual
 #### Scenario: Missing attribution data is safe
 - **WHEN** the dashboard overview response omits attribution data or returns an empty array
 - **THEN** the dashboard still renders the existing overview, usage donuts, account cards, and request logs without errors
+
+#### Scenario: No visible API keys keeps the dashboard quiet
+- **GIVEN** all API keys have dashboard visibility disabled
+- **WHEN** the dashboard overview is loaded
+- **THEN** the per-key attribution section is not shown as a large empty report
+
+### Requirement: APIs tab controls dashboard visibility per key
+
+The APIs tab SHALL expose a per-key control for whether that key is shown on the dashboard. The control MUST default to off for keys whose `showOnDashboard` value is false and MUST update the key through the normal API-key update flow.
+
+#### Scenario: Operator enables a key from the APIs tab
+- **GIVEN** an API key is hidden from the dashboard
+- **WHEN** an operator turns on its dashboard visibility control
+- **THEN** the APIs tab persists `showOnDashboard = true`
+- **AND** the key becomes eligible for named dashboard attribution rows

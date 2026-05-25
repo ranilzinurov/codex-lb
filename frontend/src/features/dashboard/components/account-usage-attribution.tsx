@@ -18,6 +18,14 @@ export type AccountUsageAttributionProps = {
   secondaryWindow: DashboardApiKeyAttributionWindow | null;
 };
 
+const COLOR_CLASSES = [
+  "bg-chart-1",
+  "bg-chart-2",
+  "bg-chart-3",
+  "bg-chart-4",
+  "bg-chart-5",
+] as const;
+
 function accountLabel(item: DashboardApiKeyAttributionEntry): { label: string; isEmail: boolean } {
   const label = item.accountDisplayLabel || item.accountEmail || item.accountId || "Unknown account";
   return {
@@ -33,8 +41,29 @@ function apiKeyLabel(item: DashboardApiKeyAttributionEntry): string {
   return item.apiKeyName || item.keyPrefix || item.apiKeyId || "Unknown key";
 }
 
+function colorForItem(item: DashboardApiKeyAttributionEntry, index: number): string {
+  if (item.bucket === "unattributed") {
+    return "bg-amber-500";
+  }
+
+  const source = item.apiKeyId || item.keyPrefix || item.apiKeyName || String(index);
+  let hash = 0;
+  for (let i = 0; i < source.length; i += 1) {
+    hash = (hash + source.charCodeAt(i) * (i + 1)) % COLOR_CLASSES.length;
+  }
+  return COLOR_CLASSES[hash];
+}
+
 function sortedItems(items: DashboardApiKeyAttributionEntry[]): DashboardApiKeyAttributionEntry[] {
-  return [...items].sort((a, b) => (b.attributionSharePercent ?? 0) - (a.attributionSharePercent ?? 0));
+  return [...items].sort((a, b) => {
+    const shareDelta = (b.attributionSharePercent ?? 0) - (a.attributionSharePercent ?? 0);
+    if (shareDelta !== 0) return shareDelta;
+    return apiKeyLabel(a).localeCompare(apiKeyLabel(b));
+  });
+}
+
+function hasApiKeyEntries(window: DashboardApiKeyAttributionWindow | null): boolean {
+  return (window?.entries ?? []).some((item) => item.bucket === "api_key");
 }
 
 function AttributionWindow({
@@ -45,91 +74,72 @@ function AttributionWindow({
   window: DashboardApiKeyAttributionWindow | null;
 }) {
   const blurred = usePrivacyStore((s) => s.blurred);
-  const visibleItems = sortedItems(window?.entries ?? []);
+  const items = sortedItems(window?.entries ?? []);
 
   return (
-    <div className="rounded-xl border bg-card">
-      <div className="flex items-center justify-between gap-3 border-b px-4 py-3">
-        <div className="min-w-0">
-          <h3 className="text-sm font-semibold">{title}</h3>
-          <p className="text-xs text-muted-foreground">
-            {visibleItems.length > 0
-              ? `${formatNumber(window?.totalEstimatedUsedCredits)} estimated credits`
-              : "No attribution rows"}
-          </p>
-        </div>
+    <div className="min-w-0 space-y-3">
+      <div className="flex items-baseline justify-between gap-3">
+        <h3 className="text-sm font-semibold">{title}</h3>
+        <p className="shrink-0 text-xs tabular-nums text-muted-foreground">
+          {formatNumber(window?.totalEstimatedUsedCredits)} credits used
+        </p>
       </div>
-      {visibleItems.length === 0 ? (
-        <div className="px-4 py-6 text-sm text-muted-foreground">No usage attributed in this window.</div>
+
+      {items.length === 0 ? (
+        <div className="rounded-md border border-dashed px-3 py-4 text-sm text-muted-foreground">
+          No opted-in key usage in this quota window.
+        </div>
       ) : (
-        <div className="divide-y">
-          {visibleItems.map((item, index) => {
+        <div className="space-y-2">
+          {items.map((item, index) => {
             const account = accountLabel(item);
             const keyLabel = apiKeyLabel(item);
-            const marker =
-              item.bucket === "unattributed"
-                ? "Unattributed"
-                : item.isAttributionEstimated
-                  ? "Estimated"
-                  : null;
+            const percent = Math.max(0, Math.min(100, item.attributionSharePercent ?? 0));
+            const colorClass = colorForItem(item, index);
+            const meta = [
+              `${formatNumber(item.estimatedCredits)} credits`,
+              `${formatCompactNumber(item.totalTokens)} tokens`,
+              `${formatCompactNumber(item.requestCount)} req`,
+              formatCurrency(item.totalCostUsd),
+            ].join(" | ");
 
             return (
               <div
                 key={`${window?.windowKey ?? title}-${item.accountId ?? "none"}-${item.apiKeyId ?? keyLabel}-${index}`}
-                className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1.6fr)_minmax(8rem,0.7fr)_minmax(8rem,0.7fr)] md:items-center"
+                className="space-y-1.5"
               >
-                <div className="min-w-0">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <KeyRound className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                    <p className="truncate text-sm font-medium">{keyLabel}</p>
-                    {item.keyPrefix && item.bucket !== "unattributed" ? (
-                      <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                        {item.keyPrefix}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <span className={cn("h-2 w-2 shrink-0 rounded-full", colorClass)} />
+                      <KeyRound className="h-3 w-3 shrink-0 text-muted-foreground" />
+                      <p className="truncate text-xs font-medium">{keyLabel}</p>
+                      {item.keyPrefix && item.bucket !== "unattributed" ? (
+                        <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                          {item.keyPrefix}
+                        </span>
+                      ) : null}
+                      {item.isAttributionEstimated ? (
+                        <span className="shrink-0 text-[10px] text-muted-foreground">est.</span>
+                      ) : null}
+                    </div>
+                    <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                      <span className={blurred && account.isEmail ? "privacy-blur" : undefined}>
+                        {account.label}
                       </span>
-                    ) : null}
-                    {marker ? (
-                      <span
-                        className={cn(
-                          "shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium",
-                          item.bucket === "unattributed"
-                            ? "bg-amber-500/10 text-amber-700 dark:text-amber-300"
-                            : "bg-blue-500/10 text-blue-700 dark:text-blue-300",
-                        )}
-                      >
-                        {marker}
-                      </span>
-                    ) : null}
+                      <span className="mx-1 text-muted-foreground/40">|</span>
+                      <span className="tabular-nums">{meta}</span>
+                    </p>
                   </div>
-                  <p className="mt-1 truncate text-xs text-muted-foreground">
-                    <span className={blurred && account.isEmail ? "privacy-blur" : undefined}>
-                      {account.label}
-                    </span>
-                  </p>
+                  <span className="shrink-0 text-xs font-semibold tabular-nums">
+                    {formatPercentNullable(item.attributionSharePercent)}
+                  </span>
                 </div>
-
-                <div>
-                  <p className="text-xs text-muted-foreground">Credits</p>
-                  <p className="text-sm font-semibold tabular-nums">
-                    {formatNumber(item.estimatedCredits)}
-                    <span className="ml-2 text-xs font-normal text-muted-foreground">
-                      {formatPercentNullable(item.attributionSharePercent)}
-                    </span>
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-3 gap-3 text-xs md:block md:space-y-1">
-                  <div>
-                    <p className="text-muted-foreground">Requests</p>
-                    <p className="font-medium tabular-nums">{formatCompactNumber(item.requestCount)}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Tokens</p>
-                    <p className="font-medium tabular-nums">{formatCompactNumber(item.totalTokens)}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Cost</p>
-                    <p className="font-medium tabular-nums">{formatCurrency(item.totalCostUsd)}</p>
-                  </div>
+                <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className={cn("h-full rounded-full transition-all", colorClass)}
+                    style={{ width: `${percent}%` }}
+                  />
                 </div>
               </div>
             );
@@ -144,21 +154,27 @@ export function AccountUsageAttribution({
   primaryWindow,
   secondaryWindow,
 }: AccountUsageAttributionProps) {
-  if ((primaryWindow?.entries.length ?? 0) === 0 && (secondaryWindow?.entries.length ?? 0) === 0) {
+  if (!hasApiKeyEntries(primaryWindow) && !hasApiKeyEntries(secondaryWindow)) {
     return null;
   }
 
   return (
-    <section className="space-y-4" data-testid="account-usage-attribution">
+    <section className="space-y-3" data-testid="account-usage-attribution">
       <div className="flex items-center gap-3">
         <h2 className="text-[13px] font-medium uppercase tracking-wider text-muted-foreground">
           API Key Attribution
         </h2>
         <div className="h-px flex-1 bg-border" />
       </div>
-      <div className="grid gap-4 xl:grid-cols-2">
-        <AttributionWindow title="5-hour usage" window={primaryWindow} />
-        <AttributionWindow title="Weekly usage" window={secondaryWindow} />
+      <div className="rounded-xl border bg-card p-4">
+        <div className="grid gap-4 lg:grid-cols-2 lg:divide-x">
+          <div className="min-w-0 lg:pr-4">
+            <AttributionWindow title="5h current quota" window={primaryWindow} />
+          </div>
+          <div className="min-w-0 border-t pt-4 lg:border-t-0 lg:pl-4 lg:pt-0">
+            <AttributionWindow title="Weekly current quota" window={secondaryWindow} />
+          </div>
+        </div>
       </div>
     </section>
   );

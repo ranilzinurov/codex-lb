@@ -423,6 +423,7 @@ export function createApiKey(overrides: Partial<ApiKey> = {}): ApiKey {
 		keyPrefix: "sk-test",
 		allowedModels: ["gpt-5.1"],
 		applyToCodexModel: false,
+		showOnDashboard: false,
 		expiresAt: offsetIso(30 * 24 * 60),
 		isActive: true,
 		accountAssignmentScopeEnabled: false,

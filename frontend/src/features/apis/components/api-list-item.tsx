@@ -1,5 +1,6 @@
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { MiniQuotaBar } from "@/components/mini-quota-bar";
 import type { ApiKey } from "@/features/api-keys/schemas";
 import { formatPercentNullable } from "@/utils/formatters";
@@ -29,7 +30,9 @@ function MiniUsageBar({ percent }: { percent: number | null }) {
 export type ApiListItemProps = {
   apiKey: ApiKey;
   selected: boolean;
+  busy?: boolean;
   onSelect: (keyId: string) => void;
+  onToggleDashboard: (apiKey: ApiKey) => void;
 };
 
 function formatLimitPercent(apiKey: ApiKey): number | null {
@@ -49,7 +52,13 @@ function isExpired(apiKey: ApiKey): boolean {
   return new Date(apiKey.expiresAt).getTime() < Date.now();
 }
 
-export function ApiListItem({ apiKey, selected, onSelect }: ApiListItemProps) {
+export function ApiListItem({
+  apiKey,
+  selected,
+  busy = false,
+  onSelect,
+  onToggleDashboard,
+}: ApiListItemProps) {
   const expired = isExpired(apiKey);
   const primary = apiKey.pooledRemainingPercentPrimary ?? null;
   const secondary = apiKey.pooledRemainingPercentSecondary ?? null;
@@ -59,9 +68,7 @@ export function ApiListItem({ apiKey, selected, onSelect }: ApiListItemProps) {
   const limitPct = formatLimitPercent(apiKey);
 
   return (
-    <button
-      type="button"
-      onClick={() => onSelect(apiKey.id)}
+    <div
       className={cn(
         "w-full rounded-lg px-3 py-2.5 text-left transition-colors",
         selected
@@ -69,59 +76,82 @@ export function ApiListItem({ apiKey, selected, onSelect }: ApiListItemProps) {
           : "hover:bg-muted/50",
       )}
     >
-      <div className="flex items-center gap-2.5">
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium">{apiKey.name}</p>
-        </div>
-        <Badge
-          className={cn(
-            !apiKey.isActive || expired
-              ? "bg-zinc-500 text-white"
-              : "bg-emerald-500 text-white",
-          )}
+      <div className="flex items-start gap-2.5">
+        <button
+          type="button"
+          onClick={() => onSelect(apiKey.id)}
+          className="min-w-0 flex-1 text-left"
         >
-          {!apiKey.isActive ? "Disabled" : expired ? "Expired" : "Active"}
-        </Badge>
-      </div>
-      {visibleRows > 0 ? (
-        <div className={cn("mt-2 grid gap-2", visibleRows > 1 ? "grid-cols-2" : "grid-cols-1")}>
-          {hasPrimary ? (
-            <div className="space-y-1">
-              <div className="flex items-center justify-between text-[11px]">
-                <span className="text-muted-foreground">Pooled 5h</span>
-                <span className="tabular-nums font-medium">{formatPercentNullable(primary)}</span>
-              </div>
-              <MiniQuotaBar
-                aria-label="Pooled 5h credits remaining"
-                percent={primary}
-                testId="pooled-quota-track-5h"
-              />
-            </div>
-          ) : null}
-          {hasSecondary ? (
-            <div className="space-y-1">
-              <div className="flex items-center justify-between text-[11px]">
-                <span className="text-muted-foreground">Pooled Weekly</span>
-                <span className="tabular-nums font-medium">{formatPercentNullable(secondary)}</span>
-              </div>
-              <MiniQuotaBar
-                aria-label="Pooled weekly credits remaining"
-                percent={secondary}
-                testId="pooled-quota-track-weekly"
-              />
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-      {limitPct !== null ? (
-        <div className="mt-1.5 space-y-1">
-          <div className="flex items-center justify-between text-[11px]">
-            <span className="text-muted-foreground">API Limit</span>
-            <span className="tabular-nums font-medium">{formatPercentNullable(limitPct)}</span>
+          <div className="flex min-w-0 items-center gap-2">
+            <p className="truncate text-sm font-medium">{apiKey.name}</p>
+            <Badge
+              className={cn(
+                "shrink-0",
+                !apiKey.isActive || expired
+                  ? "bg-zinc-500 text-white"
+                  : "bg-emerald-500 text-white",
+              )}
+            >
+              {!apiKey.isActive ? "Disabled" : expired ? "Expired" : "Active"}
+            </Badge>
           </div>
-          <MiniUsageBar percent={limitPct} />
+        </button>
+        <div className="flex shrink-0 items-center gap-1.5 pt-0.5">
+          <span className="text-[11px] text-muted-foreground">Dashboard</span>
+          <Switch
+            size="sm"
+            aria-label={`Show ${apiKey.name} on dashboard`}
+            checked={apiKey.showOnDashboard}
+            disabled={busy}
+            onCheckedChange={() => onToggleDashboard(apiKey)}
+          />
         </div>
-      ) : null}
-    </button>
+      </div>
+      <button
+        type="button"
+        onClick={() => onSelect(apiKey.id)}
+        className="mt-1 w-full text-left"
+      >
+        {visibleRows > 0 ? (
+          <div className={cn("mt-2 grid gap-2", visibleRows > 1 ? "grid-cols-2" : "grid-cols-1")}>
+            {hasPrimary ? (
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-muted-foreground">Pooled 5h</span>
+                  <span className="tabular-nums font-medium">{formatPercentNullable(primary)}</span>
+                </div>
+                <MiniQuotaBar
+                  aria-label="Pooled 5h credits remaining"
+                  percent={primary}
+                  testId="pooled-quota-track-5h"
+                />
+              </div>
+            ) : null}
+            {hasSecondary ? (
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-muted-foreground">Pooled Weekly</span>
+                  <span className="tabular-nums font-medium">{formatPercentNullable(secondary)}</span>
+                </div>
+                <MiniQuotaBar
+                  aria-label="Pooled weekly credits remaining"
+                  percent={secondary}
+                  testId="pooled-quota-track-weekly"
+                />
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+        {limitPct !== null ? (
+          <div className="mt-1.5 space-y-1">
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="text-muted-foreground">API Limit</span>
+              <span className="tabular-nums font-medium">{formatPercentNullable(limitPct)}</span>
+            </div>
+            <MiniUsageBar percent={limitPct} />
+          </div>
+        ) : null}
+      </button>
+    </div>
   );
 }

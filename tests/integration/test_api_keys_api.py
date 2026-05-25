@@ -104,6 +104,7 @@ async def test_api_keys_crud_and_regenerate(async_client):
     assert payload["key"].startswith("sk-clb-")
     assert payload["accountAssignmentScopeEnabled"] is False
     assert payload["assignedAccountIds"] == []
+    assert payload["showOnDashboard"] is False
     assert len(payload["limits"]) == 1
     assert payload["limits"][0]["limitType"] == "total_tokens"
     assert payload["limits"][0]["maxValue"] == 1000
@@ -119,6 +120,7 @@ async def test_api_keys_crud_and_regenerate(async_client):
     assert "key" not in rows[0]
     assert rows[0]["accountAssignmentScopeEnabled"] is False
     assert rows[0]["assignedAccountIds"] == []
+    assert rows[0]["showOnDashboard"] is False
     assert len(rows[0]["limits"]) == 1
 
     updated = await async_client.patch(
@@ -126,12 +128,14 @@ async def test_api_keys_crud_and_regenerate(async_client):
         json={
             "name": "prod-key",
             "isActive": False,
+            "showOnDashboard": True,
         },
     )
     assert updated.status_code == 200
     updated_payload = updated.json()
     assert updated_payload["name"] == "prod-key"
     assert updated_payload["isActive"] is False
+    assert updated_payload["showOnDashboard"] is True
 
     regenerated = await async_client.post(f"/api/api-keys/{key_id}/regenerate")
     assert regenerated.status_code == 200

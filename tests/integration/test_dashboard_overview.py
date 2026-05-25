@@ -153,7 +153,10 @@ async def test_dashboard_overview_combines_data(async_client, db_setup):
 async def test_dashboard_overview_includes_estimated_api_key_attribution(async_client, db_setup):
     now = utcnow().replace(microsecond=0)
 
-    create_key = await async_client.post("/api/api-keys/", json={"name": "attributed-key"})
+    create_key = await async_client.post(
+        "/api/api-keys/",
+        json={"name": "attributed-key", "showOnDashboard": True},
+    )
     assert create_key.status_code == 200
     key_id = create_key.json()["id"]
 
@@ -242,6 +245,118 @@ async def test_dashboard_overview_includes_estimated_api_key_attribution(async_c
     assert other_unattributed["requestCount"] == 0
     assert other_unattributed["estimatedCredits"] == pytest.approx(45.0)
     assert other_unattributed["attributionSharePercent"] == pytest.approx(100.0)
+
+
+@pytest.mark.asyncio
+async def test_dashboard_overview_attribution_hides_keys_without_dashboard_opt_in(async_client, db_setup):
+    now = utcnow().replace(microsecond=0)
+
+    visible_key = await async_client.post(
+        "/api/api-keys/",
+        json={"name": "visible-key", "showOnDashboard": True},
+    )
+    assert visible_key.status_code == 200
+    visible_key_id = visible_key.json()["id"]
+
+    hidden_key = await async_client.post("/api/api-keys/", json={"name": "hidden-key"})
+    assert hidden_key.status_code == 200
+    hidden_payload = hidden_key.json()
+    hidden_key_id = hidden_payload["id"]
+    assert hidden_payload["showOnDashboard"] is False
+
+    async with SessionLocal() as session:
+        accounts_repo = AccountsRepository(session)
+        usage_repo = UsageRepository(session)
+
+        await accounts_repo.upsert(_make_account("acc_attr_hidden", "attr-hidden@example.com"))
+        await usage_repo.add_entry(
+            "acc_attr_hidden",
+            20.0,
+            window="primary",
+            window_minutes=300,
+            recorded_at=now - timedelta(minutes=1),
+        )
+        session.add_all(
+            [
+                RequestLog(
+                    account_id="acc_attr_hidden",
+                    api_key_id=visible_key_id,
+                    request_id="req_attr_visible_key",
+                    model="gpt-5.1",
+                    status="success",
+                    requested_at=now - timedelta(minutes=2),
+                    input_tokens=100,
+                    output_tokens=20,
+                    cached_input_tokens=10,
+                    cost_usd=0.25,
+                ),
+                RequestLog(
+                    account_id="acc_attr_hidden",
+                    api_key_id=hidden_key_id,
+                    request_id="req_attr_hidden_key",
+                    model="gpt-5.1",
+                    status="success",
+                    requested_at=now - timedelta(minutes=2),
+                    input_tokens=30,
+                    output_tokens=10,
+                    cached_input_tokens=0,
+                    cost_usd=0.25,
+                ),
+                RequestLog(
+                    account_id="acc_attr_hidden",
+                    api_key_id="missing-key-id",
+                    request_id="req_attr_unknown_key",
+                    model="gpt-5.1",
+                    status="success",
+                    requested_at=now - timedelta(minutes=2),
+                    input_tokens=30,
+                    output_tokens=10,
+                    cached_input_tokens=0,
+                    cost_usd=0.25,
+                ),
+                RequestLog(
+                    account_id="acc_attr_hidden",
+                    api_key_id=None,
+                    request_id="req_attr_no_key_hidden",
+                    model="gpt-5.1",
+                    status="success",
+                    requested_at=now - timedelta(minutes=2),
+                    input_tokens=30,
+                    output_tokens=10,
+                    cached_input_tokens=0,
+                    cost_usd=0.25,
+                ),
+            ]
+        )
+        await session.commit()
+
+    response = await async_client.get("/api/dashboard/overview")
+    assert response.status_code == 200
+    payload = response.json()
+
+    entries = payload["apiKeyAttribution"]["primary"]["entries"]
+    leaked_key_ids = {entry["apiKeyId"] for entry in entries if entry["apiKeyId"] is not None}
+    assert leaked_key_ids == {visible_key_id}
+
+    visible_entry = next(entry for entry in entries if entry["apiKeyId"] == visible_key_id)
+    assert visible_entry["bucket"] == "api_key"
+    assert visible_entry["apiKeyName"] == "visible-key"
+    assert visible_entry["requestCount"] == 1
+    assert visible_entry["estimatedCredits"] == pytest.approx(11.25)
+    assert visible_entry["attributionSharePercent"] == pytest.approx(25.0)
+
+    unattributed = next(
+        entry
+        for entry in entries
+        if entry["accountId"] == "acc_attr_hidden" and entry["bucket"] == "unattributed"
+    )
+    assert unattributed["apiKeyId"] is None
+    assert unattributed["apiKeyName"] is None
+    assert unattributed["requestCount"] == 3
+    assert unattributed["totalTokens"] == 120
+    assert unattributed["totalCostUsd"] == pytest.approx(0.75)
+    assert unattributed["estimatedCredits"] == pytest.approx(33.75)
+    assert unattributed["attributionSharePercent"] == pytest.approx(75.0)
 
 
 @pytest.mark.asyncio

@@ -61,6 +61,7 @@ function ApiKeyCreateForm({ busy, onClose, onSubmit }: ApiKeyCreateFormProps) {
   const [enforcedReasoningEffort, setEnforcedReasoningEffort] = useState("none");
   const [enforcedServiceTier, setEnforcedServiceTier] = useState("none");
   const [applyToCodexModel, setApplyToCodexModel] = useState(false);
+  const [showOnDashboard, setShowOnDashboard] = useState(false);
 
   const handleSubmit = async (values: FormValues) => {
     const validLimits = limitRules.filter((rule) => rule.maxValue > 0);
@@ -68,6 +69,7 @@ function ApiKeyCreateForm({ busy, onClose, onSubmit }: ApiKeyCreateFormProps) {
       name: values.name,
       allowedModels: selectedModels.length > 0 ? selectedModels : undefined,
       applyToCodexModel,
+      showOnDashboard,
       ...(selectedAccountIds.length > 0 ? { assignedAccountIds: selectedAccountIds } : {}),
       enforcedModel: enforcedModel.trim() ? enforcedModel.trim() : null,
       enforcedReasoningEffort:
@@ -123,6 +125,17 @@ function ApiKeyCreateForm({ busy, onClose, onSubmit }: ApiKeyCreateFormProps) {
               <label htmlFor="create-api-key-apply-to-codex-model" className="cursor-pointer">
                 Apply to codex /model
               </label>
+            </div>
+
+            <div className="flex items-center justify-between gap-3 rounded-md border p-2">
+              <label htmlFor="create-api-key-show-on-dashboard" className="cursor-pointer text-sm">
+                Show on dashboard
+              </label>
+              <Checkbox
+                id="create-api-key-show-on-dashboard"
+                checked={showOnDashboard}
+                onCheckedChange={(checked) => setShowOnDashboard(checked === true)}
+              />
             </div>
 
             <div className="space-y-1">

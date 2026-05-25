@@ -158,4 +158,21 @@ describe("ApisPage", () => {
 		expect(screen.getByText("Pooled Weekly")).toBeInTheDocument();
 		expect(screen.getByText("API Limit")).toBeInTheDocument();
 	});
+
+	it("updates dashboard visibility from the API list", async () => {
+		const user = userEvent.setup();
+		const updateMutation = createMutationMock();
+		updateMutation.mutateAsync.mockResolvedValue(createApiKey({ showOnDashboard: true }));
+		renderApisPage({
+			apiKeys: [createApiKey({ name: "Production key", showOnDashboard: false })],
+			updateMutation,
+		});
+
+		await user.click(screen.getAllByRole("switch", { name: "Show Production key on dashboard" })[0]);
+
+		expect(updateMutation.mutateAsync).toHaveBeenCalledWith({
+			keyId: "key_1",
+			payload: { showOnDashboard: true },
+		});
+	});
 });

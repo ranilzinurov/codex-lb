@@ -273,6 +273,44 @@ describe("ApiKeyEditDialog", () => {
     expect(onSubmit.mock.calls[0][0].applyToCodexModel).toBe(true);
   });
 
+  it("submits the dashboard switch value", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    renderWithProviders(
+      <ApiKeyEditDialog
+        open
+        busy={false}
+        apiKey={createApiKey()}
+        onOpenChange={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await user.click(screen.getByRole("switch", { name: "Show on dashboard" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+    });
+
+    expect(onSubmit.mock.calls[0][0].showOnDashboard).toBe(true);
+  });
+
+  it("shows the stored dashboard switch value", () => {
+    renderWithProviders(
+      <ApiKeyEditDialog
+        open
+        busy={false}
+        apiKey={createApiKey({ showOnDashboard: true })}
+        onOpenChange={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("switch", { name: "Show on dashboard" })).toBeChecked();
+  });
+
   it("shows the stored codex /model checkbox value", () => {
     renderWithProviders(
       <ApiKeyEditDialog

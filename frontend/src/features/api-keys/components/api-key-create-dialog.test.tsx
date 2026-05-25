@@ -21,6 +21,19 @@ describe("ApiKeyCreateDialog", () => {
     expect(screen.getByRole("checkbox", { name: "Apply to codex /model" })).not.toBeChecked();
   });
 
+  it("shows the dashboard checkbox unchecked by default", () => {
+    renderWithProviders(
+      <ApiKeyCreateDialog
+        open
+        busy={false}
+        onOpenChange={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("checkbox", { name: "Show on dashboard" })).not.toBeChecked();
+  });
+
   it("submits the codex /model checkbox value", async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn().mockResolvedValue(undefined);
@@ -43,6 +56,30 @@ describe("ApiKeyCreateDialog", () => {
     });
 
     expect(onSubmit.mock.calls[0][0].applyToCodexModel).toBe(true);
+  });
+
+  it("submits the dashboard checkbox value", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    renderWithProviders(
+      <ApiKeyCreateDialog
+        open
+        busy={false}
+        onOpenChange={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await user.type(screen.getByLabelText("Name"), "Dashboard key");
+    await user.click(screen.getByRole("checkbox", { name: "Show on dashboard" }));
+    await user.click(screen.getByRole("button", { name: "Create" }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+    });
+
+    expect(onSubmit.mock.calls[0][0].showOnDashboard).toBe(true);
   });
 
   it("resets the codex /model checkbox when the dialog is dismissed", async () => {

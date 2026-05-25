@@ -17,6 +17,7 @@ const callbacks = {
 	onDelete: vi.fn(),
 	onRegenerate: vi.fn(),
 	onToggleActive: vi.fn(),
+	onToggleDashboard: vi.fn(),
 };
 
 function renderApiDetail(overrides: Partial<ComponentProps<typeof ApiDetail>> = {}) {
@@ -71,7 +72,8 @@ describe("ApiDetail", () => {
 		expect(screen.getByText("Tokens")).toBeInTheDocument();
 		expect(screen.getByText("Cost")).toBeInTheDocument();
 		expect(screen.getByTestId("api-trend-legend")).toBeInTheDocument();
-		expect(screen.getByRole("switch")).toBeInTheDocument();
+		expect(screen.getByRole("switch", { name: "Accumulated" })).toBeInTheDocument();
+		expect(screen.getByRole("switch", { name: "Show on dashboard" })).toBeInTheDocument();
 		expect(screen.getByText("Key Details")).toBeInTheDocument();
 	});
 
@@ -218,7 +220,7 @@ describe("ApiDetail", () => {
 			}),
 		});
 
-		const toggle = screen.getByRole("switch");
+		const toggle = screen.getByRole("switch", { name: "Accumulated" });
 		expect(toggle).not.toBeChecked();
 
 		await user.click(toggle);
@@ -272,6 +274,18 @@ describe("ApiDetail", () => {
 		expect(onDelete).toHaveBeenCalledWith(apiKey);
 	});
 
+	it("invokes the dashboard visibility callback", async () => {
+		const user = userEvent.setup();
+		const apiKey = createApiKey({ showOnDashboard: false });
+		const onToggleDashboard = vi.fn();
+
+		renderApiDetail({ apiKey, onToggleDashboard });
+
+		await user.click(screen.getByRole("switch", { name: "Show on dashboard" }));
+
+		expect(onToggleDashboard).toHaveBeenCalledWith(apiKey);
+	});
+
 	it("opens the actions menu and routes edit and regenerate actions", async () => {
 		const user = userEvent.setup();
 		const apiKey = createApiKey();
@@ -304,9 +318,10 @@ describe("ApiDetail", () => {
 		expect(screen.getByRole("button", { name: "Actions" })).toBeDisabled();
 		expect(screen.getByRole("button", { name: "Disable" })).toBeDisabled();
 		expect(screen.getByRole("button", { name: "Delete" })).toBeDisabled();
-		expect(screen.getByRole("switch")).toBeEnabled();
+		expect(screen.getByRole("switch", { name: "Show on dashboard" })).toBeDisabled();
+		expect(screen.getByRole("switch", { name: "Accumulated" })).toBeEnabled();
 
-		await user.click(screen.getByRole("switch"));
-		expect(screen.getByRole("switch")).toBeChecked();
+		await user.click(screen.getByRole("switch", { name: "Accumulated" }));
+		expect(screen.getByRole("switch", { name: "Accumulated" })).toBeChecked();
 	});
 });
