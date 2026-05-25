@@ -26,6 +26,18 @@ class _RequestLogFilters:
     needs_related_search_joins: bool
 
 
+@dataclass(frozen=True, slots=True)
+class ApiKeyAccountUsageAggregate:
+    account_id: str
+    api_key_id: str | None
+    api_key_name: str | None
+    api_key_prefix: str | None
+    request_count: int
+    total_tokens: int
+    cached_input_tokens: int
+    total_cost_usd: float
+
+
 class RequestLogsRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -165,6 +177,58 @@ class RequestLogsRepository:
         result = await self._session.execute(stmt)
         row = result.first()
         return str(row[0]) if row and row[0] else None
+
+    async def aggregate_api_key_account_usage(
+        self,
+        since_by_account_id: dict[str, datetime],
+    ) -> list[ApiKeyAccountUsageAggregate]:
+        if not since_by_account_id:
+            return []
+
+        account_window_conditions = [
+            and_(RequestLog.account_id == account_id, RequestLog.requested_at >= since)
+            for account_id, since in since_by_account_id.items()
+        ]
+        stmt = (
+            select(
+                RequestLog.account_id,
+                RequestLog.api_key_id,
+                ApiKey.name.label("api_key_name"),
+                ApiKey.key_prefix.label("api_key_prefix"),
+                func.count(RequestLog.id).label("request_count"),
+                func.coalesce(func.sum(RequestLog.input_tokens), 0).label("input_tokens"),
+                func.coalesce(
+                    func.sum(func.coalesce(RequestLog.output_tokens, RequestLog.reasoning_tokens, 0)),
+                    0,
+                ).label("output_tokens"),
+                func.coalesce(func.sum(RequestLog.cached_input_tokens), 0).label("cached_input_tokens"),
+                func.coalesce(func.sum(RequestLog.cost_usd), 0.0).label("cost_usd"),
+            )
+            .outerjoin(ApiKey, ApiKey.id == RequestLog.api_key_id)
+            .where(or_(*account_window_conditions), _normal_traffic_clause())
+            .group_by(RequestLog.account_id, RequestLog.api_key_id, ApiKey.name, ApiKey.key_prefix)
+        )
+        result = await self._session.execute(stmt)
+        aggregates: list[ApiKeyAccountUsageAggregate] = []
+        for row in result.all():
+            if not row.account_id:
+                continue
+            input_tokens = int(row.input_tokens or 0)
+            output_tokens = int(row.output_tokens or 0)
+            cached_input_tokens = max(0, min(int(row.cached_input_tokens or 0), input_tokens))
+            aggregates.append(
+                ApiKeyAccountUsageAggregate(
+                    account_id=row.account_id,
+                    api_key_id=row.api_key_id,
+                    api_key_name=row.api_key_name,
+                    api_key_prefix=row.api_key_prefix,
+                    request_count=int(row.request_count or 0),
+                    total_tokens=input_tokens + output_tokens,
+                    cached_input_tokens=cached_input_tokens,
+                    total_cost_usd=round(float(row.cost_usd or 0.0), 6),
+                )
+            )
+        return aggregates
 
     async def add_log(
         self,

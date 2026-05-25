@@ -9,7 +9,7 @@ from app.core.usage.types import BucketModelAggregate, RequestActivityAggregate
 from app.db.models import Account, AccountLimitWarmup, AdditionalUsageHistory, RequestLog, UsageHistory
 from app.modules.accounts.repository import AccountsRepository
 from app.modules.limit_warmup.repository import LimitWarmupRepository
-from app.modules.request_logs.repository import RequestLogsRepository
+from app.modules.request_logs.repository import ApiKeyAccountUsageAggregate, RequestLogsRepository
 from app.modules.usage.repository import AdditionalUsageRepository, UsageRepository
 
 
@@ -61,6 +61,12 @@ class DashboardRepository:
 
     async def top_error_since(self, since: datetime) -> str | None:
         return await self._logs_repo.top_error_since(since)
+
+    async def aggregate_api_key_account_usage(
+        self,
+        since_by_account_id: dict[str, datetime],
+    ) -> list[ApiKeyAccountUsageAggregate]:
+        return await self._logs_repo.aggregate_api_key_account_usage(since_by_account_id)
 
     async def list_additional_quota_keys(
         self,

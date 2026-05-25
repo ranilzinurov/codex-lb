@@ -6,6 +6,7 @@ import { RefreshCw } from "lucide-react";
 import { AlertMessage } from "@/components/alert-message";
 import { useAccountMutations } from "@/features/accounts/hooks/use-accounts";
 import { AccountCards } from "@/features/dashboard/components/account-cards";
+import { AccountUsageAttribution } from "@/features/dashboard/components/account-usage-attribution";
 import { DashboardSkeleton } from "@/features/dashboard/components/dashboard-skeleton";
 import { OverviewTimeframeSelect } from "@/features/dashboard/components/filters/overview-timeframe-select";
 import { RequestFilters } from "@/features/dashboard/components/filters/request-filters";
@@ -209,6 +210,11 @@ export function DashboardPage() {
               safeLineSecondary={view.safeLineSecondary}
             />
           )}
+
+          <AccountUsageAttribution
+            primaryWindow={overview?.apiKeyAttribution?.primary ?? null}
+            secondaryWindow={overview?.apiKeyAttribution?.secondary ?? null}
+          />
 
           <section className="space-y-4">
             <div className="flex items-center gap-3">

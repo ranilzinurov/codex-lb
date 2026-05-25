@@ -49,6 +49,35 @@ export const UsageCostSchema = z.object({
   totalUsd: z.number(),
 });
 
+export const DashboardApiKeyAttributionEntrySchema = z.object({
+  bucket: z.enum(["api_key", "unattributed"]),
+  accountId: z.string().nullable().optional().default(null),
+  accountEmail: z.string().nullable().optional().default(null),
+  accountDisplayLabel: z.string().nullable().optional().default(null),
+  apiKeyId: z.string().nullable().optional().default(null),
+  apiKeyName: z.string().nullable().optional().default(null),
+  keyPrefix: z.string().nullable().optional().default(null),
+  requestCount: z.number().int().nonnegative().default(0),
+  totalTokens: z.number().int().nonnegative().default(0),
+  cachedInputTokens: z.number().int().nonnegative().default(0),
+  totalCostUsd: z.number().nullable().optional().default(null),
+  estimatedCredits: z.number().nullable().optional().default(null),
+  attributionSharePercent: z.number().nullable().optional().default(null),
+  isAttributionEstimated: z.boolean().optional().default(true),
+});
+
+export const DashboardApiKeyAttributionWindowSchema = z.object({
+  windowKey: z.enum(["primary", "secondary"]),
+  windowMinutes: z.number().int().positive().nullable().optional().default(null),
+  totalEstimatedUsedCredits: z.number().nullable().optional().default(null),
+  entries: z.array(DashboardApiKeyAttributionEntrySchema).default([]),
+});
+
+export const DashboardApiKeyAttributionSchema = z.object({
+  primary: DashboardApiKeyAttributionWindowSchema,
+  secondary: DashboardApiKeyAttributionWindowSchema.nullable().optional().default(null),
+});
+
 export const DashboardMetricsSchema = z.object({
   requests: z.number().nullable(),
   tokens: z.number().nullable(),
@@ -122,6 +151,7 @@ export const DashboardOverviewSchema = z.object({
   }),
   trends: MetricsTrendsSchema,
   additionalQuotas: z.array(AccountAdditionalQuotaSchema).default([]),
+  apiKeyAttribution: DashboardApiKeyAttributionSchema.nullable().optional().default(null),
   depletionPrimary: DepletionSchema.nullable().optional(),
   depletionSecondary: DepletionSchema.nullable().optional(),
   weeklyCreditPace: WeeklyCreditPaceSchema.nullable().optional(),
@@ -198,6 +228,9 @@ export const FilterStateSchema = z.object({
 export type DashboardMetrics = z.infer<typeof DashboardMetricsSchema>;
 export type DashboardOverview = z.infer<typeof DashboardOverviewSchema>;
 export type DashboardOverviewTimeframe = z.infer<typeof DashboardOverviewTimeframeSchema>;
+export type DashboardApiKeyAttributionEntry = z.infer<typeof DashboardApiKeyAttributionEntrySchema>;
+export type DashboardApiKeyAttributionWindow = z.infer<typeof DashboardApiKeyAttributionWindowSchema>;
+export type DashboardApiKeyAttribution = z.infer<typeof DashboardApiKeyAttributionSchema>;
 export type TrendPoint = z.infer<typeof TrendPointSchema>;
 export type MetricsTrends = z.infer<typeof MetricsTrendsSchema>;
 export type UsageWindow = z.infer<typeof UsageWindowSchema>;

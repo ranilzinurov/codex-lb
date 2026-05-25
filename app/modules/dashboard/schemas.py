@@ -54,6 +54,37 @@ class DepletionResponse(DashboardModel):
     seconds_until_exhaustion: float | None = None
 
 
+DashboardApiKeyAttributionBucket = Literal["api_key", "unattributed"]
+
+
+class DashboardApiKeyUsageAttributionEntry(DashboardModel):
+    bucket: DashboardApiKeyAttributionBucket
+    account_id: str = Field(alias="accountId")
+    account_email: str | None = Field(default=None, alias="accountEmail")
+    api_key_id: str | None = Field(default=None, alias="apiKeyId")
+    api_key_name: str | None = Field(default=None, alias="apiKeyName")
+    key_prefix: str | None = Field(default=None, alias="keyPrefix")
+    request_count: int = Field(alias="requestCount")
+    total_tokens: int = Field(alias="totalTokens")
+    cached_input_tokens: int = Field(alias="cachedInputTokens")
+    total_cost_usd: float = Field(alias="totalCostUsd")
+    estimated_credits: float = Field(alias="estimatedCredits")
+    attribution_share_percent: float = Field(alias="attributionSharePercent")
+    is_attribution_estimated: bool = Field(default=True, alias="isAttributionEstimated")
+
+
+class DashboardApiKeyUsageAttributionWindow(DashboardModel):
+    window_key: Literal["primary", "secondary"] = Field(alias="windowKey")
+    window_minutes: int | None = Field(default=None, alias="windowMinutes")
+    total_estimated_used_credits: float = Field(alias="totalEstimatedUsedCredits")
+    entries: list[DashboardApiKeyUsageAttributionEntry] = Field(default_factory=list)
+
+
+class DashboardApiKeyUsageAttribution(DashboardModel):
+    primary: DashboardApiKeyUsageAttributionWindow
+    secondary: DashboardApiKeyUsageAttributionWindow | None = None
+
+
 WeeklyCreditPaceStatus = Literal["behind", "on_track", "ahead", "danger"]
 WeeklyCreditPaceConfidence = Literal["high", "medium", "low"]
 
@@ -96,3 +127,4 @@ class DashboardOverviewResponse(DashboardModel):
     depletion_primary: DepletionResponse | None = None
     depletion_secondary: DepletionResponse | None = None
     weekly_credit_pace: WeeklyCreditPaceResponse | None = None
+    api_key_attribution: DashboardApiKeyUsageAttribution | None = None
