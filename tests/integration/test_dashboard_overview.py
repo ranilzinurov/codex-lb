@@ -429,9 +429,10 @@ async def test_dashboard_overview_attribution_uses_current_reset_window(async_cl
 
 
 @pytest.mark.asyncio
-async def test_dashboard_overview_primary_attribution_excludes_external_codex_usage(async_client, db_setup):
+async def test_dashboard_overview_primary_attribution_includes_current_external_codex_usage(async_client, db_setup):
     now = utcnow().replace(microsecond=0)
-    reset_at = now + timedelta(hours=1)
+    window_start = now - timedelta(hours=4)
+    reset_at = window_start + timedelta(minutes=300)
 
     created = await async_client.post(
         "/api/api-keys/",
@@ -480,6 +481,19 @@ async def test_dashboard_overview_primary_attribution_excludes_external_codex_us
                     output_tokens=500,
                     cost_usd=100.0,
                 ),
+                RequestLog(
+                    account_id="acc_primary_external",
+                    api_key_id=key_id,
+                    request_id="req_primary_external_codex_old",
+                    model="gpt-5.5",
+                    transport="external_codex_usage",
+                    source="external_codex_usage:ranil:test",
+                    status="success",
+                    requested_at=window_start - timedelta(minutes=1),
+                    input_tokens=2000,
+                    output_tokens=1000,
+                    cost_usd=200.0,
+                ),
             ]
         )
         await session.commit()
@@ -488,9 +502,9 @@ async def test_dashboard_overview_primary_attribution_excludes_external_codex_us
     assert response.status_code == 200
     entries = response.json()["apiKeyAttribution"]["primary"]["entries"]
     entry = next(item for item in entries if item["apiKeyId"] == key_id)
-    assert entry["requestCount"] == 1
-    assert entry["totalTokens"] == 15
-    assert entry["totalCostUsd"] == pytest.approx(1.0)
+    assert entry["requestCount"] == 2
+    assert entry["totalTokens"] == 1515
+    assert entry["totalCostUsd"] == pytest.approx(101.0)
 
 
 @pytest.mark.asyncio

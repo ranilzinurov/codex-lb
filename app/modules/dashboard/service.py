@@ -303,7 +303,7 @@ class DashboardService:
         )
         aggregates = await self._repo.aggregate_api_key_account_usage(
             since_by_account_id,
-            include_external_usage=window_key != "primary",
+            include_external_usage=True,
         )
 
         entries = _build_api_key_attribution_entries(
