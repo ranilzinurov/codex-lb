@@ -26,6 +26,8 @@ from app.modules.dashboard_auth.service import (
     DashboardAuthService,
     get_dashboard_session_store,
 )
+from app.modules.external_usage.repository import ExternalUsageRepository
+from app.modules.external_usage.service import ExternalUsageService
 from app.modules.firewall.repository import FirewallRepository
 from app.modules.firewall.service import FirewallRepositoryPort, FirewallService
 from app.modules.limit_warmup.repository import LimitWarmupRepository
@@ -124,6 +126,13 @@ class DashboardContext:
     session: AsyncSession
     repository: DashboardRepository
     service: DashboardService
+
+
+@dataclass(slots=True)
+class ExternalUsageContext:
+    session: AsyncSession
+    repository: ExternalUsageRepository
+    service: ExternalUsageService
 
 
 @dataclass(slots=True)
@@ -303,6 +312,14 @@ def get_dashboard_context(
     repository = DashboardRepository(session)
     service = DashboardService(repository)
     return DashboardContext(session=session, repository=repository, service=service)
+
+
+def get_external_usage_context(
+    session: AsyncSession = Depends(get_session),
+) -> ExternalUsageContext:
+    repository = ExternalUsageRepository(session)
+    service = ExternalUsageService(repository)
+    return ExternalUsageContext(session=session, repository=repository, service=service)
 
 
 def get_firewall_context(

@@ -1,0 +1,1 @@
+"""External usage ingestion module."""

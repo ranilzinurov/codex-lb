@@ -1,0 +1,6 @@
+- [x] 1.1 Add external Codex usage ingestion schemas and service contract.
+- [x] 1.2 Persist ingested buckets as idempotent synthetic `request_logs` rows under the authenticated API key.
+- [x] 1.3 Register an authenticated API route for ingestion.
+- [x] 1.4 Add a local JSONL token-count uploader script.
+- [x] 1.5 Add integration coverage for ingest, replacement, and request-log visibility.
+- [x] 1.6 Run targeted tests and OpenSpec validation.

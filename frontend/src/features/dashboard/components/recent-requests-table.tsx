@@ -49,6 +49,7 @@ const TRANSPORT_LABELS: Record<string, string> = {
   http: "HTTP",
   websocket: "WS",
   automation: "Automation",
+  external_codex_usage: "Local",
 };
 
 const TRANSPORT_CLASS_MAP: Record<string, string> = {
@@ -57,6 +58,8 @@ const TRANSPORT_CLASS_MAP: Record<string, string> = {
   websocket: "bg-sky-500/15 text-sky-700 border-sky-500/20 hover:bg-sky-500/20 dark:text-sky-300",
   automation:
     "bg-indigo-500/15 text-indigo-700 border-indigo-500/20 hover:bg-indigo-500/20 dark:text-indigo-300",
+  external_codex_usage:
+    "bg-amber-500/15 text-amber-700 border-amber-500/20 hover:bg-amber-500/20 dark:text-amber-300",
 };
 
 const PLAN_CLASS_MAP: Record<string, string> = {
@@ -279,7 +282,7 @@ export function RecentRequestsTable({
                       <div className="space-y-1">
                         <Badge
                           variant="outline"
-                          className={TRANSPORT_CLASS_MAP[request.transport] ?? TRANSPORT_CLASS_MAP.http}
+                          className={`max-w-full whitespace-nowrap ${TRANSPORT_CLASS_MAP[request.transport] ?? TRANSPORT_CLASS_MAP.http}`}
                           title="Downstream client transport"
                         >
                           {TRANSPORT_LABELS[request.transport] ?? request.transport}

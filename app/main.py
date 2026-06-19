@@ -59,6 +59,7 @@ from app.modules.automations.scheduler import build_automations_scheduler
 from app.modules.conversation_archive import api as conversation_archive_api
 from app.modules.dashboard import api as dashboard_api
 from app.modules.dashboard_auth import api as dashboard_auth_api
+from app.modules.external_usage import api as external_usage_api
 from app.modules.firewall import api as firewall_api
 from app.modules.fleet import api as fleet_api
 from app.modules.health import api as health_api
@@ -602,6 +603,7 @@ def create_app() -> FastAPI:
     app.include_router(rate_limit_reset_credits_api.router)
     app.include_router(dashboard_api.router)
     app.include_router(usage_api.router)
+    app.include_router(external_usage_api.router)
     app.include_router(request_logs_api.router)
     app.include_router(quota_planner_api.router)
     app.include_router(reports_api.router)
