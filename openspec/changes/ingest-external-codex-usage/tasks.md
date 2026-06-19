@@ -4,3 +4,5 @@
 - [x] 1.4 Add a local JSONL token-count uploader script.
 - [x] 1.5 Add integration coverage for ingest, replacement, and request-log visibility.
 - [x] 1.6 Run targeted tests and OpenSpec validation.
+- [x] 1.7 Fix dashboard attribution to use current reset windows and keep external Codex usage out of 5-hour attribution.
+- [x] 1.8 Ignore upstream long primary usage windows and preserve paid plans when usage refresh reports `free`.

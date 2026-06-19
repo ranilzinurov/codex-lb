@@ -33,6 +33,39 @@ def _make_account(account_id: str, email: str) -> Account:
 
 
 @pytest.mark.asyncio
+async def test_usage_repository_latest_primary_prefers_semantic_window(db_setup):
+    now = utcnow().replace(microsecond=0)
+    async with SessionLocal() as session:
+        accounts_repo = AccountsRepository(session)
+        usage_repo = UsageRepository(session)
+
+        await accounts_repo.upsert(_make_account("acc_primary_semantic", "primary-semantic@example.com"))
+        await usage_repo.add_entry(
+            "acc_primary_semantic",
+            24.0,
+            window="primary",
+            window_minutes=300,
+            recorded_at=now - timedelta(minutes=10),
+        )
+        await usage_repo.add_entry(
+            "acc_primary_semantic",
+            5.0,
+            window="primary",
+            window_minutes=43200,
+            recorded_at=now - timedelta(minutes=1),
+        )
+
+        latest = await usage_repo.latest_entry_for_account("acc_primary_semantic", window="primary")
+        latest_by_account = await usage_repo.latest_by_account(window="primary")
+
+    assert latest is not None
+    assert latest.used_percent == pytest.approx(24.0)
+    assert latest.window_minutes == 300
+    assert latest_by_account["acc_primary_semantic"].used_percent == pytest.approx(24.0)
+    assert latest_by_account["acc_primary_semantic"].window_minutes == 300
+
+
+@pytest.mark.asyncio
 async def test_usage_summary_cost_includes_cached_tokens(db_setup):
     async with SessionLocal() as session:
         accounts_repo = AccountsRepository(session)

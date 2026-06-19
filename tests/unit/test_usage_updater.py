@@ -438,6 +438,44 @@ async def test_usage_refresh_recovers_quota_exceeded_account_when_usage_is_avail
 
 
 @pytest.mark.asyncio
+async def test_usage_updater_ignores_long_primary_rate_limit_window(monkeypatch) -> None:
+    monkeypatch.setenv("CODEX_LB_USAGE_REFRESH_ENABLED", "true")
+    from app.core.config.settings import get_settings
+
+    get_settings.cache_clear()
+
+    async def stub_fetch_usage(*, access_token: str, account_id: str | None, **_: Any) -> UsagePayload:
+        del access_token, account_id
+        return UsagePayload.model_validate(
+            {
+                "rate_limit": {
+                    "primary_window": {
+                        "used_percent": 5.0,
+                        "reset_at": 1784479915,
+                        "limit_window_seconds": 30 * 24 * 60 * 60,
+                    },
+                    "secondary_window": {
+                        "used_percent": 25.0,
+                        "reset_at": 1782347996,
+                        "limit_window_seconds": 7 * 24 * 60 * 60,
+                    },
+                }
+            }
+        )
+
+    monkeypatch.setattr("app.modules.usage.updater.fetch_usage", stub_fetch_usage)
+
+    usage_repo = StubUsageRepository()
+    updater = UsageUpdater(usage_repo, accounts_repo=None)
+
+    await updater.refresh_accounts([_make_account("acc_long_primary", "workspace_long_primary")], latest_usage={})
+
+    assert [(entry.window, entry.used_percent, entry.window_minutes) for entry in usage_repo.entries] == [
+        ("secondary", 25.0, 10080)
+    ]
+
+
+@pytest.mark.asyncio
 async def test_usage_refresh_keeps_recent_quota_exceeded_cooldown(monkeypatch) -> None:
     monkeypatch.setenv("CODEX_LB_USAGE_REFRESH_ENABLED", "true")
     from app.core.config.settings import get_settings
@@ -1295,6 +1333,95 @@ async def test_usage_updater_syncs_plan_type_from_usage_payload(monkeypatch) -> 
     assert token_update["account_id"] == "acc_plan_sync"
     assert token_update["plan_type"] == "plus"
     assert usage_repo.entries == []
+
+
+@pytest.mark.asyncio
+async def test_usage_updater_keeps_paid_plan_when_free_payload_has_primary_window(monkeypatch) -> None:
+    monkeypatch.setenv("CODEX_LB_USAGE_REFRESH_ENABLED", "true")
+    from app.core.config.settings import get_settings
+
+    get_settings.cache_clear()
+
+    async def stub_fetch_usage(**_: Any) -> UsagePayload:
+        return UsagePayload.model_validate(
+            {
+                "plan_type": "free",
+                "rate_limit": {
+                    "primary_window": {
+                        "used_percent": 24.0,
+                        "reset_at": 1781893756,
+                        "limit_window_seconds": 300 * 60,
+                    },
+                    "secondary_window": {
+                        "used_percent": 25.0,
+                        "reset_at": 1782347996,
+                        "limit_window_seconds": 7 * 24 * 60 * 60,
+                    },
+                },
+            }
+        )
+
+    monkeypatch.setattr("app.modules.usage.updater.fetch_usage", stub_fetch_usage)
+
+    usage_repo = StubUsageRepository()
+    accounts_repo = StubAccountsRepository()
+    updater = UsageUpdater(usage_repo, accounts_repo=accounts_repo)
+    acc = _make_account("acc_plan_no_downgrade", "workspace_plan_no_downgrade", email="paid@example.com")
+    accounts_repo.accounts_by_id[acc.id] = acc
+    acc.plan_type = "pro"
+
+    await updater.refresh_accounts([acc], latest_usage={})
+
+    assert acc.plan_type == "pro"
+    assert accounts_repo.token_updates == []
+    assert [(entry.window, entry.used_percent, entry.window_minutes) for entry in usage_repo.entries] == [
+        ("primary", 24.0, 300),
+        ("secondary", 25.0, 10080),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_usage_updater_keeps_paid_plan_when_free_payload_has_long_primary_window(monkeypatch) -> None:
+    monkeypatch.setenv("CODEX_LB_USAGE_REFRESH_ENABLED", "true")
+    from app.core.config.settings import get_settings
+
+    get_settings.cache_clear()
+
+    async def stub_fetch_usage(**_: Any) -> UsagePayload:
+        return UsagePayload.model_validate(
+            {
+                "plan_type": "free",
+                "rate_limit": {
+                    "primary_window": {
+                        "used_percent": 5.0,
+                        "reset_at": 1784479915,
+                        "limit_window_seconds": 30 * 24 * 60 * 60,
+                    },
+                    "secondary_window": {
+                        "used_percent": 25.0,
+                        "reset_at": 1782347996,
+                        "limit_window_seconds": 7 * 24 * 60 * 60,
+                    },
+                },
+            }
+        )
+
+    monkeypatch.setattr("app.modules.usage.updater.fetch_usage", stub_fetch_usage)
+
+    usage_repo = StubUsageRepository()
+    accounts_repo = StubAccountsRepository()
+    updater = UsageUpdater(usage_repo, accounts_repo=accounts_repo)
+    acc = _make_account("acc_plan_long_no_downgrade", "workspace_plan_long_no_downgrade")
+    accounts_repo.accounts_by_id[acc.id] = acc
+    acc.plan_type = "pro"
+
+    await updater.refresh_accounts([acc], latest_usage={})
+
+    assert acc.plan_type == "pro"
+    assert accounts_repo.token_updates == []
+    assert [(entry.window, entry.used_percent, entry.window_minutes) for entry in usage_repo.entries] == [
+        ("secondary", 25.0, 10080)
+    ]
 
 
 @pytest.mark.asyncio

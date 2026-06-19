@@ -18,6 +18,7 @@ from app.db.models import Account, ApiKey, RequestLog
 from app.db.session import sqlite_writer_section
 
 _INTERNAL_LIMIT_WARMUP_SOURCE = "limit_warmup"
+_EXTERNAL_CODEX_USAGE_TRANSPORT = "external_codex_usage"
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,6 +183,8 @@ class RequestLogsRepository:
     async def aggregate_api_key_account_usage(
         self,
         since_by_account_id: dict[str, datetime],
+        *,
+        include_external_usage: bool = True,
     ) -> list[ApiKeyAccountUsageAggregate]:
         if not since_by_account_id:
             return []
@@ -190,6 +193,9 @@ class RequestLogsRepository:
             and_(RequestLog.account_id == account_id, RequestLog.requested_at >= since)
             for account_id, since in since_by_account_id.items()
         ]
+        traffic_conditions = [_normal_traffic_clause()]
+        if not include_external_usage:
+            traffic_conditions.append(_not_external_codex_usage_clause())
         stmt = (
             select(
                 RequestLog.account_id,
@@ -207,7 +213,7 @@ class RequestLogsRepository:
                 func.coalesce(func.sum(RequestLog.cost_usd), 0.0).label("cost_usd"),
             )
             .outerjoin(ApiKey, ApiKey.id == RequestLog.api_key_id)
-            .where(or_(*account_window_conditions), _normal_traffic_clause())
+            .where(or_(*account_window_conditions), *traffic_conditions)
             .group_by(
                 RequestLog.account_id,
                 RequestLog.api_key_id,
@@ -600,3 +606,7 @@ async def _safe_rollback(session: AsyncSession) -> None:
 
 def _normal_traffic_clause():
     return or_(RequestLog.source.is_(None), RequestLog.source != _INTERNAL_LIMIT_WARMUP_SOURCE)
+
+
+def _not_external_codex_usage_clause():
+    return or_(RequestLog.transport.is_(None), RequestLog.transport != _EXTERNAL_CODEX_USAGE_TRANSPORT)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from app.core import usage as usage_core
@@ -301,7 +301,10 @@ class DashboardService:
             window_key=window_key,
             now=now,
         )
-        aggregates = await self._repo.aggregate_api_key_account_usage(since_by_account_id)
+        aggregates = await self._repo.aggregate_api_key_account_usage(
+            since_by_account_id,
+            include_external_usage=window_key != "primary",
+        )
 
         entries = _build_api_key_attribution_entries(
             window_key=window_key,
@@ -400,7 +403,11 @@ def _attribution_since_by_account_id(
         window_minutes = row.window_minutes or default_minutes
         if window_minutes is None or window_minutes <= 0:
             continue
-        since_by_account_id[account_id] = now - timedelta(minutes=window_minutes)
+        if row.reset_at is not None:
+            reset_at = datetime.fromtimestamp(row.reset_at, tz=UTC).replace(tzinfo=None)
+            since_by_account_id[account_id] = reset_at - timedelta(minutes=window_minutes)
+        else:
+            since_by_account_id[account_id] = now - timedelta(minutes=window_minutes)
     return since_by_account_id
 
 

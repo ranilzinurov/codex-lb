@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Collection
 from datetime import datetime
 
-from sqlalchemy import Integer, and_, cast, delete, func, literal_column, or_, select, true
+from sqlalchemy import Integer, and_, case, cast, delete, func, literal_column, or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.usage.types import UsageAggregateRow, UsageTrendBucket
@@ -17,6 +17,7 @@ from app.modules.usage.additional_quota_keys import (
 )
 
 _PRIMARY_WINDOW_LITERAL = literal_column("'primary'")
+_PRIMARY_SEMANTIC_WINDOW_MINUTES = (300, 10080)
 
 
 def _normalized_window_expr():
@@ -27,6 +28,30 @@ def _window_clause(window: str | None):
     if not window or window == "primary":
         return _normalized_window_expr() == "primary"
     return UsageHistory.window == window
+
+
+def _latest_usage_ordering(window: str | None):
+    normalized_window = window or "primary"
+    if normalized_window == "primary":
+        return (
+            _primary_semantic_rank_expr().asc(),
+            UsageHistory.recorded_at.desc(),
+            UsageHistory.id.desc(),
+        )
+    return (UsageHistory.recorded_at.desc(), UsageHistory.id.desc())
+
+
+def _primary_semantic_rank_expr():
+    return case(
+        (
+            or_(
+                UsageHistory.window_minutes.is_(None),
+                UsageHistory.window_minutes.in_(_PRIMARY_SEMANTIC_WINDOW_MINUTES),
+            ),
+            0,
+        ),
+        else_=1,
+    )
 
 
 def _resolve_additional_quota_key(
@@ -83,7 +108,7 @@ class UsageRepository:
             select(UsageHistory)
             .where(UsageHistory.account_id == account_id)
             .where(_window_clause(window))
-            .order_by(UsageHistory.recorded_at.desc(), UsageHistory.id.desc())
+            .order_by(*_latest_usage_ordering(window))
             .limit(1)
         )
         result = await self._session.execute(stmt)
@@ -184,7 +209,7 @@ class UsageRepository:
                     conditions,
                     UsageHistory.account_id == acct_subq.c.id,
                 )
-                .order_by(UsageHistory.recorded_at.desc(), UsageHistory.id.desc())
+                .order_by(*_latest_usage_ordering(window))
                 .limit(1)
                 .correlate(acct_subq)
                 .lateral("latest")
@@ -201,7 +226,7 @@ class UsageRepository:
                 func.row_number()
                 .over(
                     partition_by=UsageHistory.account_id,
-                    order_by=(UsageHistory.recorded_at.desc(), UsageHistory.id.desc()),
+                    order_by=_latest_usage_ordering(window),
                 )
                 .label("row_number"),
             )

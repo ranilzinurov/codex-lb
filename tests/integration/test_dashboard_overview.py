@@ -360,6 +360,140 @@ async def test_dashboard_overview_attribution_hides_keys_without_dashboard_opt_i
 
 
 @pytest.mark.asyncio
+async def test_dashboard_overview_attribution_uses_current_reset_window(async_client, db_setup):
+    now = utcnow().replace(microsecond=0)
+    window_start = now - timedelta(hours=2)
+    reset_at = window_start + timedelta(minutes=10080)
+
+    created = await async_client.post(
+        "/api/api-keys/",
+        json={"name": "current-weekly-key", "showOnDashboard": True},
+    )
+    assert created.status_code == 200
+    key_id = created.json()["id"]
+
+    async with SessionLocal() as session:
+        accounts_repo = AccountsRepository(session)
+        usage_repo = UsageRepository(session)
+
+        await accounts_repo.upsert(_make_account("acc_current_weekly", "current-weekly@example.com"))
+        await usage_repo.add_entry(
+            "acc_current_weekly",
+            25.0,
+            window="secondary",
+            window_minutes=10080,
+            reset_at=naive_utc_to_epoch(reset_at),
+            recorded_at=now - timedelta(minutes=1),
+        )
+        session.add_all(
+            [
+                RequestLog(
+                    account_id="acc_current_weekly",
+                    api_key_id=key_id,
+                    request_id="req_current_weekly_key",
+                    model="gpt-5.1",
+                    status="success",
+                    requested_at=window_start + timedelta(minutes=1),
+                    input_tokens=100,
+                    output_tokens=20,
+                    cached_input_tokens=10,
+                    cost_usd=1.0,
+                ),
+                RequestLog(
+                    account_id="acc_current_weekly",
+                    api_key_id=None,
+                    request_id="req_previous_week_unattributed",
+                    model="gpt-5.1",
+                    status="success",
+                    requested_at=window_start - timedelta(minutes=1),
+                    input_tokens=1000,
+                    output_tokens=200,
+                    cached_input_tokens=100,
+                    cost_usd=10.0,
+                ),
+            ]
+        )
+        await session.commit()
+
+    response = await async_client.get("/api/dashboard/overview")
+    assert response.status_code == 200
+    entries = response.json()["apiKeyAttribution"]["secondary"]["entries"]
+
+    assert len(entries) == 1
+    [entry] = entries
+    assert entry["apiKeyId"] == key_id
+    assert entry["requestCount"] == 1
+    assert entry["totalTokens"] == 120
+    assert entry["estimatedCredits"] == pytest.approx(1890.0)
+    assert entry["attributionSharePercent"] == pytest.approx(100.0)
+
+
+@pytest.mark.asyncio
+async def test_dashboard_overview_primary_attribution_excludes_external_codex_usage(async_client, db_setup):
+    now = utcnow().replace(microsecond=0)
+    reset_at = now + timedelta(hours=1)
+
+    created = await async_client.post(
+        "/api/api-keys/",
+        json={"name": "primary-key", "showOnDashboard": True},
+    )
+    assert created.status_code == 200
+    key_id = created.json()["id"]
+
+    async with SessionLocal() as session:
+        accounts_repo = AccountsRepository(session)
+        usage_repo = UsageRepository(session)
+
+        await accounts_repo.upsert(_make_account("acc_primary_external", "primary-external@example.com"))
+        await usage_repo.add_entry(
+            "acc_primary_external",
+            20.0,
+            window="primary",
+            window_minutes=300,
+            reset_at=naive_utc_to_epoch(reset_at),
+            recorded_at=now - timedelta(minutes=1),
+        )
+        session.add_all(
+            [
+                RequestLog(
+                    account_id="acc_primary_external",
+                    api_key_id=key_id,
+                    request_id="req_primary_http",
+                    model="gpt-5.1",
+                    transport="http",
+                    status="success",
+                    requested_at=now - timedelta(minutes=10),
+                    input_tokens=10,
+                    output_tokens=5,
+                    cost_usd=1.0,
+                ),
+                RequestLog(
+                    account_id="acc_primary_external",
+                    api_key_id=key_id,
+                    request_id="req_primary_external_codex",
+                    model="gpt-5.5",
+                    transport="external_codex_usage",
+                    source="external_codex_usage:ranil:test",
+                    status="success",
+                    requested_at=now - timedelta(minutes=10),
+                    input_tokens=1000,
+                    output_tokens=500,
+                    cost_usd=100.0,
+                ),
+            ]
+        )
+        await session.commit()
+
+    response = await async_client.get("/api/dashboard/overview")
+    assert response.status_code == 200
+    entries = response.json()["apiKeyAttribution"]["primary"]["entries"]
+    entry = next(item for item in entries if item["apiKeyId"] == key_id)
+    assert entry["requestCount"] == 1
+    assert entry["totalTokens"] == 15
+    assert entry["totalCostUsd"] == pytest.approx(1.0)
+
+
+@pytest.mark.asyncio
 async def test_dashboard_overview_attribution_marks_missing_logs_unattributed(async_client, db_setup):
     now = utcnow().replace(microsecond=0)
 

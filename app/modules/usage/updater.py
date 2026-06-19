@@ -405,6 +405,8 @@ class UsageUpdater:
         if primary is None and secondary is None:
             additional_synced = self._additional_usage_repo is not None and payload.additional_rate_limits is not None
             return AccountRefreshResult(usage_written=additional_synced)
+        if primary and _is_long_non_primary_window(primary.limit_window_seconds):
+            primary = None
         # This is a special case that if the account type is free (or probably go)
         # The 7d stat is in primary window instead of secondary window
         # (that is widely defined as 7d in the ui)
@@ -461,6 +463,8 @@ class UsageUpdater:
 
     async def _sync_plan_type(self, account: Account, payload: UsagePayload) -> None:
         next_plan_type = coerce_account_plan_type(payload.plan_type, account.plan_type or "free")
+        if _should_ignore_free_plan_downgrade(account.plan_type, next_plan_type, payload):
+            return
         if next_plan_type == account.plan_type:
             return
 
@@ -809,6 +813,19 @@ def _window_minutes(limit_seconds: int | None) -> int | None:
     if not limit_seconds or limit_seconds <= 0:
         return None
     return max(1, math.ceil(limit_seconds / 60))
+
+
+def _is_long_non_primary_window(limit_seconds: int | None) -> bool:
+    return limit_seconds is not None and limit_seconds > 604800
+
+
+def _should_ignore_free_plan_downgrade(
+    current_plan_type: str | None,
+    next_plan_type: str,
+    payload: UsagePayload,
+) -> bool:
+    del payload
+    return next_plan_type == "free" and current_plan_type not in {None, "", "free"}
 
 
 def _now_epoch() -> int:
