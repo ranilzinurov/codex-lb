@@ -123,6 +123,14 @@ class AccountsRepository:
             elif dialect_name == "postgresql":
                 await self._acquire_postgresql_identity_lock(account.id)
 
+        if account.chatgpt_account_id:
+            existing_by_chatgpt_account_id = await self._first_account_by_chatgpt_account_id(account.chatgpt_account_id)
+            if existing_by_chatgpt_account_id:
+                _apply_account_updates(existing_by_chatgpt_account_id, account)
+                await self._session.commit()
+                await self._session.refresh(existing_by_chatgpt_account_id)
+                return existing_by_chatgpt_account_id
+
         existing = await self._session.get(Account, account.id)
         if existing:
             if merge_by_email:
@@ -287,6 +295,15 @@ class AccountsRepository:
         if len(matches) > 1:
             raise AccountIdentityConflictError(email)
         return matches[0]
+
+    async def _first_account_by_chatgpt_account_id(self, chatgpt_account_id: str) -> Account | None:
+        result = await self._session.execute(
+            select(Account)
+            .where(Account.chatgpt_account_id == chatgpt_account_id)
+            .order_by(Account.created_at.asc(), Account.id.asc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
 
     def _dialect_name(self) -> str:
         return self._session.get_bind().dialect.name

@@ -1,0 +1,5 @@
+- [x] Update account upsert logic to match existing `chatgpt_account_id` rows before duplicate-copy handling.
+- [x] Update integration coverage for same-upstream re-import with `importWithoutOverwrite` enabled.
+- [x] Keep separate-account coverage for different upstream identities with the same email.
+- [x] Repair production request-log attribution for the current account after backup.
+- [x] Verify production dashboard/account attribution after deploy.
