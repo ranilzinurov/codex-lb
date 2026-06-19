@@ -43,6 +43,13 @@ async def test_external_codex_usage_ingest_writes_synthetic_request_logs(async_c
             window_minutes=300,
             recorded_at=utcnow() - timedelta(minutes=1),
         )
+        await usage_repo.add_entry(
+            "acc_external_usage",
+            20.0,
+            window="secondary",
+            window_minutes=10080,
+            recorded_at=utcnow() - timedelta(minutes=1),
+        )
 
     created = await async_client.post(
         "/api/api-keys/",
@@ -142,7 +149,7 @@ async def test_external_codex_usage_ingest_writes_synthetic_request_logs(async_c
 
     dashboard = await async_client.get("/api/dashboard/overview")
     assert dashboard.status_code == 200
-    attribution_entries = dashboard.json()["apiKeyAttribution"]["primary"]["entries"]
+    attribution_entries = dashboard.json()["apiKeyAttribution"]["secondary"]["entries"]
     ranil_entry = next(entry for entry in attribution_entries if entry["apiKeyId"] == api_key_id)
     assert ranil_entry["apiKeyName"] == "ranil"
     assert ranil_entry["requestCount"] == 1

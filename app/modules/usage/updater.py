@@ -673,6 +673,15 @@ class UsageUpdater:
         if primary is None and secondary is None and monthly is None:
             additional_synced = self._additional_usage_repo is not None and payload.additional_rate_limits is not None
             return AccountRefreshResult(usage_written=additional_synced)
+        if primary and _is_long_non_primary_window(primary.limit_window_seconds):
+            primary = None
+        # This is a special case that if the account type is free (or probably go)
+        # The 7d stat is in primary window instead of secondary window
+        # (that is widely defined as 7d in the ui)
+        # This will cause the account usage trend is "primary" instead of "secondary"
+        if primary and primary.limit_window_seconds == 604800:
+            secondary = rate_limit.primary_window
+            primary = None
         credits_has, credits_unlimited, credits_balance = _credits_snapshot(payload)
         usage_written = False
 
@@ -746,6 +755,8 @@ class UsageUpdater:
 
     async def _sync_identity_metadata(self, account: Account, payload: UsagePayload) -> bool:
         next_plan_type = coerce_account_plan_type(payload.plan_type, account.plan_type or "free")
+        if _should_ignore_free_plan_downgrade(account.plan_type, next_plan_type, payload):
+            next_plan_type = account.plan_type or next_plan_type
         payload_workspace_id = _clean_optional(payload.workspace_id)
         next_workspace_id = payload_workspace_id or account.workspace_id
         next_workspace_label = _clean_optional(payload.workspace_label) or account.workspace_label
@@ -931,6 +942,11 @@ def _payload_mismatches_account_slot(account: Account, payload: UsagePayload) ->
         normalized_payload_plan_type = normalize_account_plan_type(payload.plan_type)
         stored_plan_type = coerce_account_plan_type(account.plan_type, "free")
         recognized_paid_plans = ACCOUNT_PLAN_TYPES - {"free"}
+        preserve_paid_plan = _should_ignore_free_plan_downgrade(
+            account.plan_type,
+            payload_plan_type,
+            payload,
+        )
         # A transition from free into a recognized paid plan (e.g. Free -> Plus)
         # or between paid plans (e.g. Plus -> Pro) is a legitimate plan change,
         # not an identity mismatch: the usage payload carries no independent
@@ -939,9 +955,8 @@ def _payload_mismatches_account_slot(account: Account, payload: UsagePayload) ->
         # introduces "free" or an unrecognized plan stays untrusted -- the
         # signature of a degraded or wrong-identity usage response that must not
         # silently rewrite the stored plan.
-        if payload_plan_type != stored_plan_type and not (
-            stored_plan_type == "unknown"
-            and normalized_payload_plan_type in recognized_paid_plans
+        if payload_plan_type != stored_plan_type and not preserve_paid_plan and not (
+            (stored_plan_type == "unknown" and normalized_payload_plan_type in recognized_paid_plans)
             or (
                 not account.workspace_id
                 and stored_plan_type in ACCOUNT_PLAN_TYPES
@@ -1199,6 +1214,19 @@ def _window_minutes(limit_seconds: int | None) -> int | None:
     if not limit_seconds or limit_seconds <= 0:
         return None
     return max(1, math.ceil(limit_seconds / 60))
+
+
+def _is_long_non_primary_window(limit_seconds: int | None) -> bool:
+    return limit_seconds is not None and limit_seconds > 604800
+
+
+def _should_ignore_free_plan_downgrade(
+    current_plan_type: str | None,
+    next_plan_type: str,
+    payload: UsagePayload,
+) -> bool:
+    del payload
+    return next_plan_type == "free" and current_plan_type not in {None, "", "free"}
 
 
 def _now_epoch() -> int:

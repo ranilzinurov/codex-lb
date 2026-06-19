@@ -87,8 +87,13 @@ class DashboardRepository:
     async def aggregate_api_key_account_usage(
         self,
         since_by_account_id: dict[str, datetime],
+        *,
+        include_external_usage: bool = True,
     ) -> list[ApiKeyAccountUsageAggregate]:
-        return await self._logs_repo.aggregate_api_key_account_usage(since_by_account_id)
+        return await self._logs_repo.aggregate_api_key_account_usage(
+            since_by_account_id,
+            include_external_usage=include_external_usage,
+        )
 
     async def list_additional_quota_keys(
         self,

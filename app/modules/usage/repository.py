@@ -10,7 +10,7 @@ from threading import RLock
 from typing import Any, cast
 
 from anyio import to_thread
-from sqlalchemy import Integer, and_, delete, func, literal_column, or_, select, true
+from sqlalchemy import Integer, and_, case, delete, func, literal_column, or_, select, true
 from sqlalchemy import cast as sqlalchemy_cast
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +27,7 @@ from app.modules.usage.additional_quota_keys import (
 )
 
 _PRIMARY_WINDOW_LITERAL = literal_column("'primary'")
+_PRIMARY_SEMANTIC_WINDOW_MINUTES = (300, 10080)
 
 
 @dataclass(frozen=True, slots=True)
@@ -265,6 +266,30 @@ def _window_clause(window: str | None):
     if not window or window == "primary":
         return _normalized_window_expr() == "primary"
     return UsageHistory.window == window
+
+
+def _latest_usage_ordering(window: str | None):
+    normalized_window = window or "primary"
+    if normalized_window == "primary":
+        return (
+            _primary_semantic_rank_expr().asc(),
+            UsageHistory.recorded_at.desc(),
+            UsageHistory.id.desc(),
+        )
+    return (UsageHistory.recorded_at.desc(), UsageHistory.id.desc())
+
+
+def _primary_semantic_rank_expr():
+    return case(
+        (
+            or_(
+                UsageHistory.window_minutes.is_(None),
+                UsageHistory.window_minutes.in_(_PRIMARY_SEMANTIC_WINDOW_MINUTES),
+            ),
+            0,
+        ),
+        else_=1,
+    )
 
 
 def _sqlite_path_from_bind(bind) -> object | None:
@@ -572,7 +597,7 @@ class UsageRepository:
             select(UsageHistory)
             .where(UsageHistory.account_id == account_id)
             .where(_window_clause(window))
-            .order_by(UsageHistory.recorded_at.desc(), UsageHistory.id.desc())
+            .order_by(*_latest_usage_ordering(window))
             .limit(1)
         )
         result = await self._session.execute(stmt)
@@ -681,7 +706,7 @@ class UsageRepository:
                     conditions,
                     UsageHistory.account_id == acct_subq.c.id,
                 )
-                .order_by(UsageHistory.recorded_at.desc(), UsageHistory.id.desc())
+                .order_by(*_latest_usage_ordering(window))
                 .limit(1)
                 .correlate(acct_subq)
                 .lateral("latest")
@@ -692,7 +717,6 @@ class UsageRepository:
             stmt = select(UsageHistory).where(UsageHistory.id.in_(id_query))
             result = await self._session.execute(stmt)
             return {entry.account_id: entry for entry in result.scalars().all()}
-
         acct_stmt = select(Account.id)
         if account_ids is not None:
             acct_stmt = acct_stmt.where(Account.id.in_(account_ids))
@@ -703,7 +727,7 @@ class UsageRepository:
                 conditions,
                 UsageHistory.account_id == acct_subq.c.id,
             )
-            .order_by(UsageHistory.recorded_at.desc(), UsageHistory.id.desc())
+            .order_by(*_latest_usage_ordering(window))
             .limit(1)
             .correlate(acct_subq)
             .scalar_subquery()
