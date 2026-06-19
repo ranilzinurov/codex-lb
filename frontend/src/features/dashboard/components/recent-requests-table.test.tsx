@@ -180,6 +180,48 @@ describe("RecentRequestsTable", () => {
     expect(within(row as HTMLElement).getAllByText("--").length).toBeGreaterThan(0);
   });
 
+  it("renders local Codex usage transport with a compact label", () => {
+    render(
+      <RecentRequestsTable
+        {...PAGINATION_PROPS}
+        accounts={[]}
+        requests={[
+          {
+            requestedAt: ISO,
+            accountId: "acc-local",
+            planType: "pro",
+            apiKeyName: "ranil",
+            apiKeyId: "key-ranil",
+            requestId: "req-local",
+            model: "gpt-5.5",
+            source: "external_codex_usage:ranil",
+            serviceTier: null,
+            requestedServiceTier: null,
+            actualServiceTier: null,
+            transport: "external_codex_usage",
+            status: "ok",
+            errorCode: null,
+            errorMessage: null,
+            tokens: 1200,
+            inputTokens: 1000,
+            outputTokens: 200,
+            cachedInputTokens: 800,
+            reasoningEffort: "medium",
+            costUsd: 0.01,
+            costBreakdown: null,
+            latencyMs: null,
+          },
+        ]}
+      />,
+    );
+
+    const row = screen.getByText("gpt-5.5 (medium)").closest("tr");
+
+    expect(row).not.toBeNull();
+    expect(within(row as HTMLElement).getByText("Local")).toBeInTheDocument();
+    expect(within(row as HTMLElement).queryByText("external_codex_usage")).not.toBeInTheDocument();
+  });
+
   it("shows details action for error-code-only rows", async () => {
     render(
       <RecentRequestsTable

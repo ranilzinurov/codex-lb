@@ -1,0 +1,6 @@
+[allowlist]
+description = "Repository-owned test fixtures and documentation placeholders"
+regexes = [
+  '''secret-rotation-2026-04-01''',
+  '''sk-clb-a1b2c3d4''',
+]

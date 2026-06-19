@@ -46,11 +46,14 @@ const STATUS_CLASS_MAP: Record<string, string> = {
 const TRANSPORT_LABELS: Record<string, string> = {
   http: "HTTP",
   websocket: "WS",
+  external_codex_usage: "Local",
 };
 
 const TRANSPORT_CLASS_MAP: Record<string, string> = {
   http: "bg-slate-500/10 text-slate-700 border-slate-500/20 hover:bg-slate-500/15 dark:text-slate-300",
   websocket: "bg-sky-500/15 text-sky-700 border-sky-500/20 hover:bg-sky-500/20 dark:text-sky-300",
+  external_codex_usage:
+    "bg-amber-500/15 text-amber-700 border-amber-500/20 hover:bg-amber-500/20 dark:text-amber-300",
 };
 
 const PLAN_CLASS_MAP: Record<string, string> = {
@@ -233,7 +236,7 @@ export function RecentRequestsTable({
                     {request.transport ? (
                       <Badge
                         variant="outline"
-                        className={TRANSPORT_CLASS_MAP[request.transport] ?? TRANSPORT_CLASS_MAP.http}
+                        className={`max-w-full whitespace-nowrap ${TRANSPORT_CLASS_MAP[request.transport] ?? TRANSPORT_CLASS_MAP.http}`}
                       >
                         {TRANSPORT_LABELS[request.transport] ?? request.transport}
                       </Badge>

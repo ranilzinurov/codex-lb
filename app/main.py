@@ -45,6 +45,7 @@ from app.modules.audit import api as audit_api
 from app.modules.conversation_archive import api as conversation_archive_api
 from app.modules.dashboard import api as dashboard_api
 from app.modules.dashboard_auth import api as dashboard_auth_api
+from app.modules.external_usage import api as external_usage_api
 from app.modules.firewall import api as firewall_api
 from app.modules.health import api as health_api
 from app.modules.oauth import api as oauth_api
@@ -363,6 +364,7 @@ def create_app() -> FastAPI:
     app.include_router(accounts_api.router)
     app.include_router(dashboard_api.router)
     app.include_router(usage_api.router)
+    app.include_router(external_usage_api.router)
     app.include_router(request_logs_api.router)
     app.include_router(conversation_archive_api.router)
     app.include_router(oauth_api.router)
