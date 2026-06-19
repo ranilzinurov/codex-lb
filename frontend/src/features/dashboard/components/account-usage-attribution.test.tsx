@@ -90,6 +90,24 @@ describe("AccountUsageAttribution", () => {
     expect(screen.getByText("est.")).toBeInTheDocument();
   });
 
+  it("uses distinct stable colors for ranil and aidar attribution rows", () => {
+    render(
+      <AccountUsageAttribution
+        primaryWindow={null}
+        secondaryWindow={window("secondary", [
+          attribution({ apiKeyId: "key-ranil", apiKeyName: "ranil", attributionSharePercent: 60 }),
+          attribution({ apiKeyId: "key-aidar", apiKeyName: "aidar", attributionSharePercent: 40 }),
+        ])}
+      />,
+    );
+
+    const ranilRow = screen.getByText("ranil").closest(".space-y-1\\.5");
+    const aidarRow = screen.getByText("aidar").closest(".space-y-1\\.5");
+
+    expect(ranilRow?.querySelector(".bg-chart-2")).not.toBeNull();
+    expect(aidarRow?.querySelector(".bg-chart-1")).not.toBeNull();
+  });
+
   it("hides when no API keys are opted in", () => {
     const { container } = render(
       <AccountUsageAttribution

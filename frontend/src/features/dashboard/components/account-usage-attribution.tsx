@@ -46,7 +46,15 @@ function colorForItem(item: DashboardApiKeyAttributionEntry, index: number): str
     return "bg-amber-500";
   }
 
-  const source = item.apiKeyId || item.keyPrefix || item.apiKeyName || String(index);
+  const normalizedName = item.apiKeyName?.trim().toLowerCase();
+  if (normalizedName === "ranil") {
+    return "bg-chart-2";
+  }
+  if (normalizedName === "aidar") {
+    return "bg-chart-1";
+  }
+
+  const source = item.apiKeyName || item.keyPrefix || item.apiKeyId || String(index);
   let hash = 0;
   for (let i = 0; i < source.length; i += 1) {
     hash = (hash + source.charCodeAt(i) * (i + 1)) % COLOR_CLASSES.length;

@@ -11,11 +11,11 @@ The system SHALL accept authenticated external Codex token-count aggregates and 
 - **THEN** the system stores synthetic request-log rows with `apiKeyId` equal to that key
 - **AND** dashboard attribution can include those rows as named usage for `ranil`
 
-#### Scenario: External Codex usage only contributes to weekly attribution
+#### Scenario: External Codex usage contributes to matching current quota windows
 - **GIVEN** a visible API key has synthetic external Codex usage rows in the current quota period
 - **WHEN** the dashboard builds 5-hour and weekly API-key attribution
-- **THEN** weekly attribution includes the external Codex rows under that API key
-- **AND** 5-hour attribution excludes those external Codex rows
+- **THEN** each attribution window includes the external Codex rows whose bucket timestamp falls inside that window
+- **AND** older external Codex rows do not contribute to the current 5-hour window
 
 #### Scenario: Attribution uses the current quota reset window
 - **GIVEN** a latest usage row has a reset timestamp and window length
