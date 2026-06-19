@@ -12,14 +12,6 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-_TOKEN_USAGE_FIELDS = (
-    "input_tokens",
-    "cached_input_tokens",
-    "output_tokens",
-    "reasoning_output_tokens",
-    "total_tokens",
-)
-
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -31,6 +23,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--account-id", default=os.environ.get("CODEX_LB_ACCOUNT_ID"))
     parser.add_argument("--source-name", default=os.environ.get("CODEX_LB_SOURCE_NAME", "ranil"))
     parser.add_argument("--lookback-hours", type=int, default=int(os.environ.get("CODEX_LB_LOOKBACK_HOURS", "48")))
+    parser.add_argument(
+        "--window-mode",
+        choices=("codex-weekly", "lookback"),
+        default=os.environ.get("CODEX_LB_WINDOW_MODE", "codex-weekly"),
+        help="Use the current Codex weekly rate-limit window when available, or a rolling lookback window.",
+    )
     parser.add_argument("--bucket-seconds", type=int, default=int(os.environ.get("CODEX_LB_BUCKET_SECONDS", "1800")))
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
@@ -56,17 +54,39 @@ def _bucket_start(timestamp: float, bucket_seconds: int) -> dt.datetime:
     return dt.datetime.fromtimestamp(bucket_epoch, tz=dt.UTC)
 
 
-def _usage_snapshot(usage: dict[str, Any]) -> dict[str, int]:
-    return {field: int(usage.get(field) or 0) for field in _TOKEN_USAGE_FIELDS}
+def _current_codex_weekly_window(codex_home: Path) -> tuple[float, float] | None:
+    latest_seen_at = -1.0
+    latest_window: tuple[float, float] | None = None
 
+    for path in _iter_jsonl_paths(codex_home):
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    try:
+                        item = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    payload = item.get("payload") or {}
+                    if item.get("type") != "event_msg" or payload.get("type") != "token_count":
+                        continue
+                    timestamp_raw = item.get("timestamp")
+                    if not isinstance(timestamp_raw, str):
+                        continue
+                    timestamp = _iso_to_timestamp(timestamp_raw)
+                    if timestamp is None or timestamp < latest_seen_at:
+                        continue
+                    secondary = ((payload.get("rate_limits") or {}).get("secondary") or {})
+                    resets_at = secondary.get("resets_at")
+                    window_minutes = secondary.get("window_minutes")
+                    if not isinstance(resets_at, (int, float)) or not isinstance(window_minutes, (int, float)):
+                        continue
+                    latest_seen_at = timestamp
+                    reset_timestamp = float(resets_at)
+                    latest_window = (reset_timestamp - (float(window_minutes) * 60), reset_timestamp)
+        except OSError:
+            continue
 
-def _usage_delta(
-    current: dict[str, int],
-    previous: dict[str, int] | None,
-) -> dict[str, int]:
-    if previous is None or current["total_tokens"] < previous["total_tokens"]:
-        return current
-    return {field: max(0, current[field] - previous[field]) for field in _TOKEN_USAGE_FIELDS}
+    return latest_window
 
 
 def _collect_buckets(
@@ -89,7 +109,6 @@ def _collect_buckets(
     for path in _iter_jsonl_paths(codex_home):
         model: str | None = None
         effort: str | None = None
-        previous_usage: dict[str, int] | None = None
         try:
             with path.open("r", encoding="utf-8") as handle:
                 for line in handle:
@@ -110,26 +129,24 @@ def _collect_buckets(
                     timestamp = _iso_to_timestamp(timestamp_raw)
                     if timestamp is None:
                         continue
+                    if timestamp < since_timestamp:
+                        continue
                     usage = ((payload.get("info") or {}).get("last_token_usage") or {})
                     if not isinstance(usage, dict):
                         continue
-                    current_usage = _usage_snapshot(usage)
-                    delta_usage = _usage_delta(current_usage, previous_usage)
-                    previous_usage = current_usage
-                    if timestamp < since_timestamp:
-                        continue
-                    if delta_usage["total_tokens"] <= 0:
+                    total_tokens = int(usage.get("total_tokens") or 0)
+                    if total_tokens <= 0:
                         continue
                     resolved_model = model or "unknown"
                     started_at = _bucket_start(timestamp, bucket_seconds)
                     key = (started_at, resolved_model, effort)
                     bucket = aggregates[key]
                     bucket["eventCount"] += 1
-                    bucket["inputTokens"] += delta_usage["input_tokens"]
-                    bucket["cachedInputTokens"] += delta_usage["cached_input_tokens"]
-                    bucket["outputTokens"] += delta_usage["output_tokens"]
-                    bucket["reasoningOutputTokens"] += delta_usage["reasoning_output_tokens"]
-                    bucket["totalTokens"] += delta_usage["total_tokens"]
+                    bucket["inputTokens"] += int(usage.get("input_tokens") or 0)
+                    bucket["cachedInputTokens"] += int(usage.get("cached_input_tokens") or 0)
+                    bucket["outputTokens"] += int(usage.get("output_tokens") or 0)
+                    bucket["reasoningOutputTokens"] += int(usage.get("reasoning_output_tokens") or 0)
+                    bucket["totalTokens"] += total_tokens
         except OSError:
             continue
 
@@ -185,9 +202,11 @@ def main() -> None:
     if args.lookback_hours <= 0:
         raise SystemExit("--lookback-hours must be positive")
 
-    since = dt.datetime.now(tz=dt.UTC).timestamp() - (args.lookback_hours * 3600)
+    codex_home = Path(args.codex_home).expanduser()
+    weekly_window = _current_codex_weekly_window(codex_home) if args.window_mode == "codex-weekly" else None
+    since = weekly_window[0] if weekly_window else dt.datetime.now(tz=dt.UTC).timestamp() - (args.lookback_hours * 3600)
     buckets = _collect_buckets(
-        codex_home=Path(args.codex_home).expanduser(),
+        codex_home=codex_home,
         since_timestamp=since,
         bucket_seconds=args.bucket_seconds,
     )
