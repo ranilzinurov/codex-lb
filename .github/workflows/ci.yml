@@ -278,14 +278,31 @@ jobs:
         run: make package
 
   docker:
-    name: Docker build
+    name: Docker build, scan, and publish digest
     runs-on: ubuntu-24.04
+    needs:
+      - frontend-lint
+      - frontend-typecheck
+      - frontend-test
+      - frontend-build
+      - lint
+      - typecheck
+      - test
+      - test-postgres
+      - migration-check
+      - migration-check-postgres
+      - package
     permissions:
       actions: read
       contents: read
+      packages: write
       security-events: write
+    outputs:
+      image: ${{ steps.candidate.outputs.image }}
+      digest: ${{ steps.candidate.outputs.digest }}
+      revision: ${{ steps.candidate.outputs.revision }}
     env:
-      DOCKER_CACHE_SCOPE: ${{ github.event_name == 'pull_request' && format('codex-lb-pr-{0}', github.event.pull_request.number) || 'codex-lb-main' }}
+      DOCKER_CACHE_SCOPE: codex-lb-runtime
 
     steps:
       - name: Checkout repository
@@ -296,7 +313,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
 
-      - name: Build Docker image
+      - name: Build one linux/amd64 runtime image
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f
         with:
           context: .
@@ -304,6 +321,11 @@ jobs:
           push: false
           load: true
           tags: codex-lb:ci
+          platforms: linux/amd64
+          build-args: |
+            VCS_REF=${{ github.sha }}
+          provenance: false
+          sbom: false
           cache-from: type=gha,scope=${{ env.DOCKER_CACHE_SCOPE }}
           cache-to: type=gha,mode=max,scope=${{ env.DOCKER_CACHE_SCOPE }}
 
@@ -325,14 +347,116 @@ jobs:
           # can compare pull-request alerts against the default-branch baseline.
           category: .github/workflows/ci.yml:docker
 
-      - name: Enforce Trivy high-severity gate
+      - name: Enforce critical-vulnerability gate before publication
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
           image-ref: codex-lb:ci
           format: table
           exit-code: 1
-          severity: CRITICAL,HIGH
+          severity: CRITICAL
           ignore-unfixed: true
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish SHA tag and resolve immutable digest
+        id: candidate
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          REVISION: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          IMAGE_REPOSITORY="ghcr.io/${GITHUB_REPOSITORY,,}"
+          IMAGE_TAG="${IMAGE_REPOSITORY}:sha-${GITHUB_SHA}"
+          docker tag codex-lb:ci "${IMAGE_TAG}"
+          docker push "${IMAGE_TAG}"
+          DIGEST="$(docker buildx imagetools inspect "${IMAGE_TAG}" --format '{{.Digest}}')"
+          [[ "${DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+            echo "Invalid registry digest: ${DIGEST}" >&2
+            exit 1
+          }
+          IMAGE="${IMAGE_TAG%@*}"
+          IMAGE="${IMAGE%:*}@${DIGEST}"
+          {
+            echo "image=${IMAGE}"
+            echo "digest=${DIGEST}"
+            echo "revision=${REVISION}"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "## Deployable image"
+            echo
+            echo "- Digest: \`${IMAGE}\`"
+            echo "- Revision: \`${REVISION}\`"
+            echo "- Auxiliary SHA tag: \`${IMAGE_TAG}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Scan the published digest with Trivy (SARIF)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          image-ref: ${{ steps.candidate.outputs.image }}
+          format: sarif
+          output: trivy-published-results.sarif
+          severity: CRITICAL,HIGH,MEDIUM,LOW
+          ignore-unfixed: true
+
+      - name: Enforce critical-vulnerability gate for the published digest
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          image-ref: ${{ steps.candidate.outputs.image }}
+          format: table
+          exit-code: 1
+          severity: CRITICAL
+          ignore-unfixed: true
+
+      - name: Verify published digest metadata and readiness
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          IMAGE: ${{ steps.candidate.outputs.image }}
+          REVISION: ${{ steps.candidate.outputs.revision }}
+        run: |
+          set -euo pipefail
+          SMOKE_CONTAINER="codex-lb-image-smoke"
+          SMOKE_VOLUME="codex-lb-image-smoke-data"
+          cleanup() {
+            docker rm --force "${SMOKE_CONTAINER}" >/dev/null 2>&1 || true
+            docker volume rm "${SMOKE_VOLUME}" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          docker pull "${IMAGE}"
+          docker image inspect "${IMAGE}" > image-inspect.json
+          python3 - <<'PY'
+          import json
+          import os
+
+          image = json.load(open("image-inspect.json", encoding="utf-8"))[0]
+          config = image["Config"]
+          assert image["Os"] == "linux", image["Os"]
+          assert image["Architecture"] == "amd64", image["Architecture"]
+          assert config["Labels"]["org.opencontainers.image.revision"] == os.environ["REVISION"]
+          assert config["Entrypoint"] == ["/app/scripts/docker-entrypoint.sh"]
+          PY
+          docker volume create "${SMOKE_VOLUME}" >/dev/null
+          docker run --detach --rm --name "${SMOKE_CONTAINER}" \
+            --mount "type=volume,src=${SMOKE_VOLUME},dst=/var/lib/codex-lb" \
+            --publish 127.0.0.1:2455:2455 \
+            "${IMAGE}" >/dev/null
+          for attempt in $(seq 1 90); do
+            HEALTH="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "${SMOKE_CONTAINER}")"
+            if [ "${HEALTH}" = "healthy" ] && curl --fail --silent --show-error http://127.0.0.1:2455/health/ready >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs "${SMOKE_CONTAINER}" >&2 || true
+          echo "Published image did not become ready" >&2
+          exit 1
 
   helm-lint:
     name: Helm lint + template + kubeconform

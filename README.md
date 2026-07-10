@@ -418,6 +418,16 @@ For Helm, pass the same values through `extraEnv`.
 
 Backup this directory to preserve your data.
 
+### Single-host production deployment
+
+Для одиночного Docker-хоста с SQLite используйте неизменяемый GHCR digest и
+команду из [руководства single-host deployment](deploy/single-host/README.md).
+Она не собирает исходный код на хосте, создаёт проверяемую резервную копию SQLite перед
+заменой сервиса, проверяет readiness и автоматически возвращает предыдущий
+образ при неудачном запуске. Не запускайте `docker-compose.prod.yml` напрямую:
+команда развёртывания обеспечивает блокировку, отсутствие параллельных SQLite
+writer-процессов SQLite и ограниченную очистку собственных артефактов.
+
 ## Troubleshooting
 
 - [Usage and quota - why does codex-lb still say `rate_limited` when Codex Desktop says reset?](openspec/specs/usage-refresh-policy/context.md)
