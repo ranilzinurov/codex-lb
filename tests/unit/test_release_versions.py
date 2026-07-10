@@ -105,6 +105,7 @@ def test_update_project_versions_keeps_all_release_files_in_sync(tmp_path: Path)
     assert_project_versions(tmp_path, "1.19.0-beta.1")
     package_version = json.loads((tmp_path / "frontend" / "package.json").read_text(encoding="utf-8"))["version"]
     assert package_version == "1.19.0-beta.1"
+    assert 'version = "1.19.0b1"' in (tmp_path / "uv.lock").read_text(encoding="utf-8")
 
 
 def test_next_beta_number_uses_existing_tags(tmp_path: Path) -> None:
