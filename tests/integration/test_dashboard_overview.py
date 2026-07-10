@@ -219,9 +219,7 @@ async def test_dashboard_overview_includes_estimated_api_key_attribution(async_c
     assert attribution["windowMinutes"] == 300
     assert attribution["totalEstimatedUsedCredits"] == pytest.approx(90.0)
 
-    entries = {
-        (entry["accountId"], entry["bucket"], entry["apiKeyId"]): entry for entry in attribution["entries"]
-    }
+    entries = {(entry["accountId"], entry["bucket"], entry["apiKeyId"]): entry for entry in attribution["entries"]}
     key_entry = entries[("acc_attr", "api_key", key_id)]
     assert key_entry["accountId"] == "acc_attr"
     assert key_entry["accountEmail"] == "attr@example.com"
@@ -346,9 +344,7 @@ async def test_dashboard_overview_attribution_hides_keys_without_dashboard_opt_i
     assert visible_entry["attributionSharePercent"] == pytest.approx(25.0)
 
     unattributed = next(
-        entry
-        for entry in entries
-        if entry["accountId"] == "acc_attr_hidden" and entry["bucket"] == "unattributed"
+        entry for entry in entries if entry["accountId"] == "acc_attr_hidden" and entry["bucket"] == "unattributed"
     )
     assert unattributed["apiKeyId"] is None
     assert unattributed["apiKeyName"] is None

@@ -317,9 +317,9 @@ class DashboardService:
             6,
         )
         return DashboardApiKeyUsageAttributionWindow(
-            window_key=_dashboard_attribution_window_key(window_key),
-            window_minutes=window_minutes,
-            total_estimated_used_credits=total_estimated_used_credits,
+            windowKey=_dashboard_attribution_window_key(window_key),
+            windowMinutes=window_minutes,
+            totalEstimatedUsedCredits=total_estimated_used_credits,
             entries=entries,
         )
 
@@ -544,18 +544,18 @@ def _api_key_attribution_entry(
         share_percent = (estimated_credits / share_denominator_credits) * 100.0
     return DashboardApiKeyUsageAttributionEntry(
         bucket=bucket,
-        account_id=account_id,
-        account_email=account_email,
-        api_key_id=api_key_id,
-        api_key_name=api_key_name,
-        key_prefix=key_prefix,
-        request_count=request_count,
-        total_tokens=total_tokens,
-        cached_input_tokens=cached_input_tokens,
-        total_cost_usd=round(total_cost_usd, 6),
-        estimated_credits=round(estimated_credits, 6),
-        attribution_share_percent=round(share_percent, 6),
-        is_attribution_estimated=True,
+        accountId=account_id,
+        accountEmail=account_email,
+        apiKeyId=api_key_id,
+        apiKeyName=api_key_name,
+        keyPrefix=key_prefix,
+        requestCount=request_count,
+        totalTokens=total_tokens,
+        cachedInputTokens=cached_input_tokens,
+        totalCostUsd=round(total_cost_usd, 6),
+        estimatedCredits=round(estimated_credits, 6),
+        attributionSharePercent=round(share_percent, 6),
+        isAttributionEstimated=True,
     )
 
 

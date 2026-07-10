@@ -30,10 +30,10 @@ async def ingest_codex_token_counts(
     except ExternalUsageValidationError as exc:
         raise DashboardBadRequestError(str(exc), code="invalid_external_usage_payload") from exc
     return ExternalCodexUsageIngestResponse(
-        source_name=result.source_name,
-        account_id=result.account_id,
-        api_key_id=result.api_key_id,
-        bucket_count=result.bucket_count,
-        request_log_count=result.request_log_count,
-        total_tokens=result.total_tokens,
+        sourceName=result.source_name,
+        accountId=result.account_id,
+        apiKeyId=result.api_key_id,
+        bucketCount=result.bucket_count,
+        requestLogCount=result.request_log_count,
+        totalTokens=result.total_tokens,
     )
