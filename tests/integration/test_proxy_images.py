@@ -376,6 +376,64 @@ async def test_images_generations_returns_envelope_on_success(async_client, monk
 
 
 @pytest.mark.asyncio
+async def test_codex_images_generations_uses_native_provider_path(async_client, monkeypatch):
+    await _import_account(async_client, "acc_codex_images", "codex-images@example.com")
+
+    async def fake_stream(payload, headers, access_token, account_id, base_url=None, raise_for_status=False, **kwargs):
+        del payload, headers, access_token, account_id, base_url, raise_for_status, kwargs
+        yield _sse(
+            {
+                "type": "response.output_item.done",
+                "item": {
+                    "type": "image_generation_call",
+                    "id": "ig_codex_native",
+                    "status": "completed",
+                    "result": "CODEX_NATIVE_B64",
+                },
+            }
+        )
+        yield _sse({"type": "response.completed", "response": {"id": "resp_codex_native"}})
+
+    async def fake_ensure_fresh(self, account, **kwargs):
+        del self, kwargs
+        return account
+
+    monkeypatch.setattr(proxy_module, "core_stream_responses", fake_stream)
+    monkeypatch.setattr(proxy_module.ProxyService, "_ensure_fresh_with_budget", fake_ensure_fresh)
+
+    response = await async_client.post(
+        "/backend-api/codex/images/generations",
+        json={"model": "gpt-image-2", "prompt": "native Codex image"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["data"] == [{"b64_json": "CODEX_NATIVE_B64"}]
+
+
+@pytest.mark.asyncio
+async def test_codex_images_actor_marker_does_not_replace_api_key(async_client):
+    enabled = await async_client.put(
+        "/api/settings",
+        json={
+            "stickyThreadsEnabled": False,
+            "preferEarlierResetAccounts": False,
+            "totpRequiredOnLogin": False,
+            "apiKeyAuthEnabled": True,
+        },
+    )
+    assert enabled.status_code == 200
+
+    response = await async_client.post(
+        "/backend-api/codex/images/generations",
+        headers={"x-openai-actor-authorization": "codex-lb"},
+        json={"model": "gpt-image-2", "prompt": "must stay authenticated"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "invalid_api_key"
+
+
+@pytest.mark.asyncio
 async def test_images_generations_streaming_emits_canonical_events(async_client, monkeypatch):
     await _import_account(async_client, "acc_images_stream", "img-stream@example.com")
 
@@ -795,8 +853,6 @@ async def test_backend_codex_images_edits_json_data_urls_round_trip(async_client
     content = cast(list[dict[str, Any]], input_items[0]["content"])
     assert content[1]["type"] == "input_image"
 
-    # Verify the upstream payload contained the image as an input_image data
-    # URL alongside the prompt text.
     input_value = cast(list[Any], captured["input"])
     assert input_value
     first_message = cast(dict[str, Any], input_value[0])
@@ -826,10 +882,7 @@ async def test_images_edits_passes_outer_started_at_after_file_reads(async_clien
     image_bytes = b"\x89PNG\r\n\x1a\n"
     response = await async_client.post(
         "/v1/images/edits",
-        data={
-            "model": "gpt-image-2",
-            "prompt": "hi",
-        },
+        data={"model": "gpt-image-2", "prompt": "hi"},
         files={"image": ("source.png", image_bytes, "image/png")},
     )
 

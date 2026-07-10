@@ -154,3 +154,14 @@ surface.
   (log and metrics) with the same `generations`/`edits` route label as the
   `/v1` counterpart, exactly once
 
+### Requirement: Codex actor marker is not upstream authorization
+
+When a client supplies `x-openai-actor-authorization` as the Codex provider
+eligibility marker, the proxy MUST remove it before constructing upstream HTTP
+or websocket requests. The marker MUST NOT replace Bearer API-key
+authentication.
+
+#### Scenario: Actor marker is stripped before upstream forwarding
+
+- **WHEN** a downstream Codex request includes `x-openai-actor-authorization`
+- **THEN** the upstream request does not contain that header and uses the selected account's upstream authorization instead

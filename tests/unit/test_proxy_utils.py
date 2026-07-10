@@ -953,6 +953,18 @@ def test_filter_inbound_headers_strips_auth_and_account():
     assert filtered["X-Request-Id"] == "req_1"
 
 
+def test_filter_inbound_headers_strips_codex_image_generation_actor_marker():
+    filtered = filter_inbound_headers(
+        {
+            "X-OpenAI-Actor-Authorization": "codex-lb",
+            "User-Agent": "codex-test",
+        }
+    )
+
+    assert "X-OpenAI-Actor-Authorization" not in filtered
+    assert filtered["User-Agent"] == "codex-test"
+
+
 def test_filter_inbound_headers_strips_proxy_identity_headers():
     headers = {
         "X-Forwarded-For": "1.2.3.4",

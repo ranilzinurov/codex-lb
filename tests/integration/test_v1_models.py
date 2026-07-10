@@ -814,6 +814,7 @@ async def test_backend_codex_models_entry_has_upstream_fields(async_client):
                     "instructions_variables": {"personality_default": ""},
                     "approvals": None,
                 },
+                "experimental_supported_tools": [],
             },
             base_instructions="You are a helpful coding assistant.",
         ),
@@ -839,6 +840,7 @@ async def test_backend_codex_models_entry_has_upstream_fields(async_client):
         "instructions_variables": {"personality_default": ""},
         "approvals": None,
     }
+    assert entry["experimental_supported_tools"] == []
 
 
 @pytest.mark.asyncio

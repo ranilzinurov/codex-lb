@@ -95,6 +95,7 @@ IGNORE_INBOUND_HEADERS = {
     "forwarded",
     "x-real-ip",
     CODEX_INSTALLATION_ID_HEADER,
+    "x-openai-actor-authorization",
     "true-client-ip",
 }
 INTERNAL_OPENAI_UPSTREAM_HEADERS = frozenset(
