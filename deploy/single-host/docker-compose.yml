@@ -1,0 +1,40 @@
+# Single-host SQLite production contract. The deployment command supplies
+# CODEX_LB_IMAGE as an immutable GHCR digest and CODEX_LB_RUNTIME_ENV_FILE.
+# Do not run this file directly: deploy.py serializes replacement, SQLite
+# backup, readiness checks, rollback, and cleanup.
+services:
+  server:
+    image: ${CODEX_LB_IMAGE:?deployment requires an image digest}
+    pull_policy: never
+    container_name: codex-lb-server
+    env_file:
+      - ${CODEX_LB_RUNTIME_ENV_FILE:?deployment requires a runtime environment file}
+    ports:
+      - "127.0.0.1:2455:2455"
+      - "127.0.0.1:1455:1455"
+    volumes:
+      - codex-lb-data:/var/lib/codex-lb
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:2455/health/ready', timeout=3).close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    restart: unless-stopped
+    stop_grace_period: 45s
+    mem_limit: 1g
+    mem_reservation: 256m
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+    labels:
+      com.codex-lb.single-host.managed: "true"
+      com.codex-lb.single-host.role: "server"
+
+volumes:
+  codex-lb-data:
+    name: codex-lb-data
+    labels:
+      com.codex-lb.single-host.managed: "true"

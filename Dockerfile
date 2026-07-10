@@ -32,6 +32,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 FROM python:3.14-slim AS runtime
 
+ARG VCS_REF=unknown
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:$PATH"
@@ -70,4 +72,10 @@ RUN chmod +x /app/scripts/docker-entrypoint.sh \
 USER app
 EXPOSE 2455 1455
 
-CMD ["/app/scripts/docker-entrypoint.sh"]
+LABEL org.opencontainers.image.revision=$VCS_REF \
+      com.codex-lb.single-host.image="true"
+
+HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=6 \
+  CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:2455/health/ready', timeout=3).close()"]
+
+ENTRYPOINT ["/app/scripts/docker-entrypoint.sh"]
