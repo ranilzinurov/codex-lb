@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from app.core.openai.exceptions import ClientPayloadError
 from app.core.openai.images import (
+    CodexImagesEditsRequest,
     V1ImageData,
     V1ImageResponse,
     V1ImagesEditsForm,
@@ -63,6 +64,23 @@ class TestV1ImagesEditsForm:
     def test_input_fidelity_high_round_trips(self) -> None:
         form = V1ImagesEditsForm.model_validate({"model": "gpt-image-1", "prompt": "edit", "input_fidelity": "high"})
         assert form.input_fidelity == "high"
+
+
+class TestCodexImagesEditsRequest:
+    def test_requires_non_empty_images(self) -> None:
+        with pytest.raises(ValidationError):
+            CodexImagesEditsRequest.model_validate({"model": "gpt-image-2", "prompt": "edit me", "images": []})
+
+    def test_accepts_codex_image_url_shape(self) -> None:
+        payload = CodexImagesEditsRequest.model_validate(
+            {
+                "model": "gpt-image-2",
+                "prompt": "edit me",
+                "images": [{"image_url": "data:image/png;base64,AAAA"}],
+            }
+        )
+
+        assert payload.images[0].image_url == "data:image/png;base64,AAAA"
 
 
 class TestV1ImageResponse:

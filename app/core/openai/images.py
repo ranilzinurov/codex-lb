@@ -1,8 +1,8 @@
-"""OpenAI Images API (`/v1/images/*`) request/response schemas.
+"""Images API request/response schemas.
 
-These schemas describe the *public* surface that codex-lb exposes. They mirror
-the OpenAI Images API request shape so SDKs (e.g. ``openai`` Python client,
-the codex CLI image fallback) can target codex-lb without modification.
+The public ``/v1/images/*`` schemas mirror the OpenAI Images API request shape.
+The Codex-native edit schema describes the JSON request emitted by Codex's
+built-in ``image_gen`` extension against its configured provider base URL.
 
 The endpoints themselves are implemented as a thin translation layer over
 ``/v1/responses`` with the built-in ``image_generation`` tool — see
@@ -343,6 +343,20 @@ class V1ImagesEditsForm(BaseModel):
         return value
 
 
+class CodexImageEditInput(BaseModel):
+    """One data-URL image in Codex's native JSON edit request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    image_url: str = Field(min_length=1)
+
+
+class CodexImagesEditsRequest(V1ImagesEditsForm):
+    """JSON edit request emitted by Codex's built-in ``image_gen`` tool."""
+
+    images: list[CodexImageEditInput] = Field(min_length=1, max_length=5)
+
+
 # ---------------------------------------------------------------------------
 # Response models
 # ---------------------------------------------------------------------------
@@ -394,6 +408,8 @@ class V1ImageResponse(BaseModel):
 
 
 __all__ = [
+    "CodexImageEditInput",
+    "CodexImagesEditsRequest",
     "GPT_IMAGE_MODEL_PREFIX",
     "V1ImageData",
     "V1ImageResponse",

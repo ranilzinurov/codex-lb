@@ -72,6 +72,7 @@ IGNORE_INBOUND_HEADERS = {
     "host",
     "forwarded",
     "x-real-ip",
+    "x-openai-actor-authorization",
     "true-client-ip",
 }
 

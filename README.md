@@ -113,6 +113,7 @@ model_provider = "codex-lb"
 name = "OpenAI"  # required — enables remote /responses/compact
 base_url = "http://127.0.0.1:2455/backend-api/codex"
 wire_api = "responses"
+http_headers = { "x-openai-actor-authorization" = "codex-lb" } # enables native image_gen
 supports_websockets = true
 requires_openai_auth = true # required for codex app
 ```
@@ -150,6 +151,7 @@ name = "OpenAI"
 base_url = "http://127.0.0.1:2455/backend-api/codex"
 wire_api = "responses"
 env_key = "CODEX_LB_API_KEY"
+http_headers = { "x-openai-actor-authorization" = "codex-lb" } # enables native image_gen
 supports_websockets = true
 requires_openai_auth = true # required for codex app
 ```
@@ -158,6 +160,11 @@ requires_openai_auth = true # required for codex app
 export CODEX_LB_API_KEY="sk-clb-..."   # key from dashboard
 codex
 ```
+
+Current Codex builds use the non-secret `x-openai-actor-authorization` marker to expose the built-in
+`image_gen.imagegen` tool for a custom provider. `codex-lb` removes this marker before forwarding
+requests upstream; the Bearer API key remains the only proxy credential. The model catalog's
+`experimental_supported_tools` field does not control native `image_gen` visibility.
 
 **Verify WebSocket transport**
 

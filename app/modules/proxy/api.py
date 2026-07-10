@@ -53,7 +53,12 @@ from app.core.middleware.api_firewall import _parse_trusted_proxy_networks, reso
 from app.core.openai.chat_requests import ChatCompletionsRequest
 from app.core.openai.chat_responses import ChatCompletionResult, collect_chat_completion, stream_chat_chunks
 from app.core.openai.exceptions import ClientPayloadError
-from app.core.openai.images import V1ImageResponse, V1ImagesEditsForm, V1ImagesGenerationsRequest
+from app.core.openai.images import (
+    CodexImagesEditsRequest,
+    V1ImageResponse,
+    V1ImagesEditsForm,
+    V1ImagesGenerationsRequest,
+)
 from app.core.openai.model_registry import UpstreamModel, get_model_registry, is_public_model
 from app.core.openai.models import (
     CompactResponseResult,
@@ -962,8 +967,9 @@ async def v1_audio_transcriptions(
     )
 
 
+@router.post("/images/generations", response_model=None)
 @v1_router.post("/images/generations", response_model=None)
-async def v1_images_generations(
+async def images_generations(
     request: Request,
     payload: V1ImagesGenerationsRequest = Body(...),
     context: ProxyContext = Depends(get_proxy_context),
@@ -972,6 +978,47 @@ async def v1_images_generations(
     return await _proxy_images_generation_request(
         request=request,
         payload=payload,
+        context=context,
+        api_key=api_key,
+    )
+
+
+@router.post("/images/edits", response_model=None)
+async def codex_images_edits(
+    request: Request,
+    payload: CodexImagesEditsRequest = Body(...),
+    context: ProxyContext = Depends(get_proxy_context),
+    api_key: ApiKeyData | None = Security(validate_proxy_api_key),
+) -> Response:
+    images: list[tuple[bytes, str | None]] = []
+    for index, image in enumerate(payload.images):
+        try:
+            image_bytes, mime_type = images_service_module.decode_data_url(image.image_url)
+        except ValueError as exc:
+            return _logged_error_json_response(
+                request,
+                400,
+                images_service_module.make_invalid_request_error(
+                    f"Invalid images[{index}].image_url: {exc}",
+                    param="images",
+                ),
+            )
+        if not image_bytes:
+            return _logged_error_json_response(
+                request,
+                400,
+                images_service_module.make_invalid_request_error(
+                    f"Invalid images[{index}].image_url: image payload is empty",
+                    param="images",
+                ),
+            )
+        images.append((image_bytes, mime_type))
+
+    return await _proxy_images_edit_request(
+        request=request,
+        payload=payload,
+        images=images,
+        mask=None,
         context=context,
         api_key=api_key,
     )
