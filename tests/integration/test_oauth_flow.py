@@ -142,7 +142,7 @@ async def test_starting_new_device_flow_cancels_previous_pending_poll(async_clie
 
 
 @pytest.mark.asyncio
-async def test_device_oauth_flow_keeps_separate_accounts_when_import_without_overwrite_enabled(
+async def test_device_oauth_flow_preserves_upstream_identity_when_import_without_overwrite_enabled(
     async_client,
     monkeypatch,
 ):
@@ -222,11 +222,10 @@ async def test_device_oauth_flow_keeps_separate_accounts_when_import_without_ove
     accounts = await async_client.get("/api/accounts")
     assert accounts.status_code == 200
     data = [account for account in accounts.json()["accounts"] if account["email"] == email]
-    assert len(data) == 2
-    ids = {account["accountId"] for account in data}
+    assert len(data) == 1
     base_id = generate_unique_account_id(raw_account_id, email)
-    assert base_id in ids
-    assert any(account_id.startswith(f"{base_id}__copy") for account_id in ids if account_id != base_id)
+    assert data[0]["accountId"] == base_id
+    assert data[0]["planType"] == "team"
 
 
 @pytest.mark.asyncio
@@ -249,7 +248,7 @@ async def test_device_oauth_flow_reports_error_when_duplicate_email_is_ambiguous
     assert enable_separate.json()["importWithoutOverwrite"] is True
 
     email = "oauth-conflict@example.com"
-    raw_account_id = "acc_oauth_conflict_base"
+    raw_account_ids = ("acc_oauth_conflict_a", "acc_oauth_conflict_b")
 
     async def fake_device_code(**_):
         return DeviceCode(
@@ -265,7 +264,7 @@ async def test_device_oauth_flow_reports_error_when_duplicate_email_is_ambiguous
     async def fake_exchange_device_token(**_):
         call_count["value"] += 1
         if call_count["value"] <= 2:
-            account_id = raw_account_id
+            account_id = raw_account_ids[call_count["value"] - 1]
             plan_type = "plus" if call_count["value"] == 1 else "team"
         else:
             account_id = "acc_oauth_conflict_new"
