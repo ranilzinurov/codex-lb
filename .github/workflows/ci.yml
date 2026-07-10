@@ -274,6 +274,9 @@ jobs:
           python-version: "3.13"
           enable-cache: true
 
+      - name: Verify release version consistency
+        run: uv run python -m scripts.verify_release_version
+
       - name: Build and verify package
         run: make package
 
