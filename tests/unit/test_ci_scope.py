@@ -2,7 +2,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from scripts.ci_scope import changed_paths, classify_paths
+from scripts.ci_scope import changed_paths, classify_paths, upstream_history_changed
 
 REPOSITORY_ROOT = Path(__file__).parents[2]
 
@@ -102,15 +102,36 @@ def test_paths_are_normalized_and_reasons_are_deduplicated() -> None:
     assert scope.reasons == ("runtime source",)
 
 
-def test_recorded_upstream_base_is_a_commit_in_fork_history() -> None:
+def test_recorded_upstream_base_is_a_full_sha() -> None:
     upstream_base = (REPOSITORY_ROOT / "UPSTREAM_BASE").read_text(encoding="utf-8").strip()
 
     assert re.fullmatch(r"[0-9a-f]{40}", upstream_base)
-    subprocess.run(
-        ["git", "merge-base", "--is-ancestor", upstream_base, "HEAD"],
-        cwd=REPOSITORY_ROOT,
-        check=True,
-    )
+
+
+def test_upstream_history_change_is_detected_in_isolated_repository(tmp_path: Path, monkeypatch) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "ci-scope@example.invalid"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "CI Scope Test"], cwd=tmp_path, check=True)
+    tracked_file = tmp_path / "tracked.txt"
+    tracked_file.write_text("base\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-qm", "base"], cwd=tmp_path, check=True)
+    recorded_base = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=tmp_path, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    upstream_base_path = tmp_path / "UPSTREAM_BASE"
+    upstream_base_path.write_text(f"{recorded_base}\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    assert upstream_history_changed(recorded_base, recorded_base, upstream_base_path) is False
+
+    tracked_file.write_text("upstream change\n", encoding="utf-8")
+    subprocess.run(["git", "commit", "-qam", "upstream change"], cwd=tmp_path, check=True)
+    upstream_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=tmp_path, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+    assert upstream_history_changed(upstream_head, upstream_head, upstream_base_path) is True
 
 
 def test_changed_paths_includes_deleted_runtime_file(tmp_path: Path, monkeypatch) -> None:
