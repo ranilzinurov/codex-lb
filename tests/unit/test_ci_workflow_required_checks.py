@@ -109,6 +109,8 @@ def test_fork_contract_required_context_uses_placeholder_for_unrelated_changes()
     assert "if" not in fork_contract_job
     assert any(step.get("if") == "needs.changes.outputs.fork_contract != 'true'" for step in steps)
     assert any(step.get("run") == "make fork-contract" for step in steps)
+    checkout = next(step for step in steps if str(step.get("uses", "")).startswith("actions/checkout@"))
+    assert checkout["with"]["fetch-depth"] == 0
 
 
 def test_makefile_exposes_documented_fork_contract_target() -> None:
