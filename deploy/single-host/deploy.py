@@ -21,22 +21,34 @@ import subprocess
 import sys
 import tempfile
 import time
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable, cast
+from typing import Any, Callable, Iterator, cast
 from urllib.error import URLError
 from urllib.parse import urlparse
 from urllib.request import urlopen
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPOSITORY_ROOT = SCRIPT_DIR.parents[1]
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from state_fingerprint import (  # noqa: E402
+    StateFingerprint,
+    build_state_fingerprint,
+    compare_fingerprints,
+)
+
 STATE_FILE_NAME = "known-good.json"
+EVENT_LOG_FILE_NAME = "deploy-events.jsonl"
 LOCK_FILE_NAME = "deploy.lock"
 BACKUP_PREFIX = "codex-lb-deploy-"
 MANAGED_CONTAINER_LABEL = "com.codex-lb.single-host.managed=true"
 IMAGE_REFERENCE_PATTERN = re.compile(r"^.+@sha256:[0-9a-f]{64}$")
 REVISION_PATTERN = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
+GHCR_REPOSITORY_PATTERN = re.compile(r"^ghcr\.io/[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._/-]*$")
 NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 ENV_KEY_PATTERN = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 EXPECTED_ENTRYPOINT = ["/app/scripts/docker-entrypoint.sh"]
@@ -70,6 +82,7 @@ class DeploymentState:
     active: KnownImage | None = None
     previous: KnownImage | None = None
     managed_images: tuple[str, ...] = ()
+    active_fingerprint: StateFingerprint | None = None
 
     @classmethod
     def load(cls, path: Path) -> DeploymentState:
@@ -99,7 +112,17 @@ class DeploymentState:
         managed_images = tuple(item for item in managed_raw if IMAGE_REFERENCE_PATTERN.fullmatch(item))
         if len(managed_images) != len(set(managed_images)):
             raise DeploymentError(f"Deployment state {path} contains duplicate managed images")
-        return cls(active=active, previous=previous, managed_images=managed_images)
+        fingerprint_raw = raw.get("active_fingerprint")
+        try:
+            active_fingerprint = StateFingerprint.from_mapping(fingerprint_raw) if fingerprint_raw is not None else None
+        except ValueError as exc:
+            raise DeploymentError(f"Deployment state {path} has invalid active_fingerprint: {exc}") from exc
+        return cls(
+            active=active,
+            previous=previous,
+            managed_images=managed_images,
+            active_fingerprint=active_fingerprint,
+        )
 
     def write(self, path: Path) -> None:
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -107,6 +130,7 @@ class DeploymentState:
             "active": asdict(self.active) if self.active else None,
             "previous": asdict(self.previous) if self.previous else None,
             "managed_images": list(self.managed_images),
+            "active_fingerprint": self.active_fingerprint.to_mapping() if self.active_fingerprint else None,
         }
         with tempfile.NamedTemporaryFile(
             "w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", delete=False
@@ -168,6 +192,10 @@ class DeploymentConfig:
     @property
     def lock_file(self) -> Path:
         return self.state_dir / LOCK_FILE_NAME
+
+    @property
+    def event_log_file(self) -> Path:
+        return self.state_dir / EVENT_LOG_FILE_NAME
 
     @classmethod
     def from_file(cls, path: Path) -> DeploymentConfig:
@@ -294,6 +322,43 @@ def parse_candidate(image: str, revision: str) -> KnownImage:
     return KnownImage(image=image, revision=revision)
 
 
+def parse_release_manifest(path: Path) -> KnownImage:
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise DeploymentError(f"Cannot read release manifest {path}: {exc}") from exc
+    if not isinstance(raw, dict) or raw.get("schema_version") != 1:
+        raise DeploymentError("Release manifest must use schema_version 1")
+    if raw.get("ready") is not True:
+        raise DeploymentError("Release manifest is not ready for deployment")
+    if raw.get("platform") != "linux/amd64":
+        raise DeploymentError("Release manifest platform must be linux/amd64")
+    repository = raw.get("repository")
+    digest = raw.get("digest")
+    image = raw.get("image")
+    revision = raw.get("revision")
+    if not isinstance(repository, str) or not isinstance(digest, str):
+        raise DeploymentError("Release manifest repository and digest must be strings")
+    if not GHCR_REPOSITORY_PATTERN.fullmatch(repository):
+        raise DeploymentError("Release manifest repository must be an untagged lowercase GHCR path")
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+        raise DeploymentError("Release manifest digest must be a full lowercase sha256 digest")
+    expected_image = f"{repository}@{digest}"
+    if image != expected_image:
+        raise DeploymentError(f"Release manifest image must equal {expected_image}")
+    if not isinstance(revision, str):
+        raise DeploymentError("Release manifest revision must be a string")
+    if not re.fullmatch(r"[0-9a-f]{40}", revision):
+        raise DeploymentError("Release manifest revision must be a full 40-character Git SHA")
+    gates = raw.get("gates")
+    required_gates = ("validation", "revision", "security")
+    if not isinstance(gates, dict) or any(
+        not isinstance(gates.get(name), dict) or gates[name].get("status") != "passed" for name in required_gates
+    ):
+        raise DeploymentError("Release manifest requires passed validation, revision, and security gates")
+    return parse_candidate(expected_image, revision)
+
+
 class SingleHostDeployment:
     def __init__(self, config: DeploymentConfig, candidate: KnownImage) -> None:
         self.config = config
@@ -396,6 +461,7 @@ class SingleHostDeployment:
 
         previous = self._select_previous(state, running)
         backup_path = self._backup_sqlite()
+        before_fingerprint = self._build_fingerprint(backup_path)
         self._prune_backups()
 
         interrupted = False
@@ -408,9 +474,16 @@ class SingleHostDeployment:
         try:
             self._start(self.candidate)
             self._wait_for_readiness(self.candidate)
+            with self._temporary_sqlite_snapshot(self.candidate.image) as post_snapshot:
+                after_fingerprint = self._build_fingerprint(post_snapshot)
+            violations = compare_fingerprints(before_fingerprint, after_fingerprint)
+            if violations:
+                raise DeploymentError("State preservation failed: " + "; ".join(violations))
         except Exception as original_error:
             if interrupted:
-                self._rollback(previous, backup_path, original_error)
+                self._rollback(previous, backup_path, original_error, state)
+            else:
+                self._append_event("candidate_failed", running, str(original_error))
             raise
 
         managed_images = tuple(
@@ -422,11 +495,22 @@ class SingleHostDeployment:
                 }
             )
         )
-        next_state = DeploymentState(active=self.candidate, previous=previous, managed_images=managed_images)
+        next_state = DeploymentState(
+            active=self.candidate,
+            previous=previous,
+            managed_images=managed_images,
+            active_fingerprint=after_fingerprint,
+        )
         next_state.write(self.config.state_file)
         remaining_images = self._prune_deployment_artifacts(next_state)
-        final_state = DeploymentState(active=self.candidate, previous=previous, managed_images=remaining_images)
+        final_state = DeploymentState(
+            active=self.candidate,
+            previous=previous,
+            managed_images=remaining_images,
+            active_fingerprint=after_fingerprint,
+        )
         final_state.write(self.config.state_file)
+        self._append_event("deployment_succeeded", self.candidate, "candidate is ready and state is preserved")
 
         print(f"Deployment succeeded: image={self.candidate.image} revision={self.candidate.revision}")
         if backup_path is not None:
@@ -610,15 +694,22 @@ class SingleHostDeployment:
         return running
 
     def _backup_sqlite(self) -> Path | None:
+        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+        backup_path = self.config.backup_dir / f"{BACKUP_PREFIX}{timestamp}.sqlite"
+        if not self._create_sqlite_snapshot(self.candidate.image, backup_path):
+            print("No SQLite backup: database volume or file does not exist yet (first installation)")
+            return None
+        print(f"SQLite backup verified: {backup_path}")
+        return backup_path
+
+    def _create_sqlite_snapshot(self, image: str, destination: Path) -> bool:
         volume = self._run_command(
             ["docker", "volume", "inspect", self.config.data_volume], check=False, capture_output=True
         )
         if volume.returncode != 0:
-            print("No SQLite backup: deployment data volume does not exist yet (first installation)")
-            return None
-
-        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-        backup_path = self.config.backup_dir / f"{BACKUP_PREFIX}{timestamp}.sqlite"
+            return False
+        if destination.parent.resolve() != self.config.backup_dir.resolve():
+            raise DeploymentError("SQLite snapshot destination must stay inside DEPLOY_BACKUP_DIR")
         backup_program = """
 import os
 import sqlite3
@@ -653,26 +744,44 @@ finally:
                 f"type=volume,src={self.config.data_volume},dst=/var/lib/codex-lb",
                 "--mount",
                 f"type=bind,src={self.config.backup_dir},dst=/backup",
-                self.candidate.image,
+                image,
                 "-c",
                 backup_program,
                 self.config.sqlite_database_path,
-                f"/backup/{backup_path.name}",
+                f"/backup/{destination.name}",
             ],
             check=False,
             capture_output=True,
         )
         if result.returncode == 20:
-            backup_path.unlink(missing_ok=True)
-            print("No SQLite backup: database file does not exist yet (first installation)")
-            return None
+            destination.unlink(missing_ok=True)
+            return False
         if result.returncode != 0:
             details = (result.stderr or result.stdout or "").strip()
-            raise DeploymentError(f"SQLite backup failed before service replacement: {details}")
-        backup_path.chmod(0o600)
-        self._verify_backup(backup_path)
-        print(f"SQLite backup verified: {backup_path}")
-        return backup_path
+            raise DeploymentError(f"SQLite snapshot failed: {details}")
+        destination.chmod(0o600)
+        self._verify_backup(destination)
+        return True
+
+    @contextmanager
+    def _temporary_sqlite_snapshot(self, image: str) -> Iterator[Path | None]:
+        with tempfile.NamedTemporaryFile(
+            dir=self.config.backup_dir,
+            prefix=".codex-lb-fingerprint-",
+            suffix=".sqlite",
+            delete=False,
+        ) as temporary:
+            path = Path(temporary.name)
+        path.unlink(missing_ok=True)
+        try:
+            yield path if self._create_sqlite_snapshot(image, path) else None
+        finally:
+            path.unlink(missing_ok=True)
+
+    def _build_fingerprint(self, database_path: Path | None) -> StateFingerprint:
+        environment = read_environment_file(self.config.runtime_env_file)
+        storage_id = f"volume:{self.config.data_volume}:{self.config.sqlite_database_path}"
+        return build_state_fingerprint(database_path, environment, storage_id)
 
     @staticmethod
     def _verify_backup(path: Path) -> None:
@@ -756,8 +865,29 @@ finally:
         except (OSError, URLError) as exc:
             return str(exc)
 
-    def _rollback(self, previous: KnownImage | None, backup_path: Path | None, original_error: Exception) -> None:
+    def _append_event(self, outcome: str, running: KnownImage | None, detail: str) -> None:
+        event = {
+            "schema_version": 1,
+            "timestamp": datetime.now(UTC).isoformat(),
+            "outcome": outcome,
+            "candidate": asdict(self.candidate),
+            "running": asdict(running) if running else None,
+            "detail": detail,
+        }
+        with self.config.event_log_file.open("a", encoding="utf-8") as output:
+            json.dump(event, output, sort_keys=True)
+            output.write("\n")
+        self.config.event_log_file.chmod(0o600)
+
+    def _rollback(
+        self,
+        previous: KnownImage | None,
+        backup_path: Path | None,
+        original_error: Exception,
+        state: DeploymentState,
+    ) -> None:
         if previous is None:
+            self._append_event("rollback_unavailable", None, str(original_error))
             details = f" Deployment-owned backup: {backup_path}." if backup_path is not None else ""
             raise DeploymentError(
                 f"Candidate failed after service interruption ({original_error}); "
@@ -766,8 +896,22 @@ finally:
             ) from original_error
         print(f"Candidate failed; rolling back to image={previous.image} revision={previous.revision}", file=sys.stderr)
         self._compose(self.candidate.image, "stop", "server", check=False)
-        self._start(previous)
-        self._wait_for_readiness(previous)
+        try:
+            self._start(previous)
+            self._wait_for_readiness(previous)
+        except Exception as rollback_error:
+            self._append_event("rollback_failed", None, str(rollback_error))
+            raise DeploymentError(
+                f"Candidate failed ({original_error}) and rollback to {previous.image} also failed: {rollback_error}"
+            ) from rollback_error
+        rollback_state = DeploymentState(
+            active=previous,
+            previous=state.previous if state.previous != previous else None,
+            managed_images=tuple(sorted({*state.managed_images, previous.image, self.candidate.image})),
+            active_fingerprint=state.active_fingerprint if state.active == previous else None,
+        )
+        rollback_state.write(self.config.state_file)
+        self._append_event("rollback_succeeded", previous, str(original_error))
         print("Rollback completed and the previous image is healthy", file=sys.stderr)
 
     def _prune_deployment_artifacts(self, state: DeploymentState) -> tuple[str, ...]:
@@ -816,10 +960,9 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--config", required=True, type=Path, help="Deployment control file; keep it outside the repository"
     )
-    parser.add_argument(
-        "--image", required=True, help="Immutable image reference, e.g. ghcr.io/owner/codex-lb@sha256:..."
-    )
-    parser.add_argument("--revision", required=True, help="Git revision emitted by CI together with the image digest")
+    parser.add_argument("--manifest", type=Path, help="ready release-manifest JSON from the local release command")
+    parser.add_argument("--image", help="immutable image reference for legacy/manual operation")
+    parser.add_argument("--revision", help="Git revision paired with --image")
     parser.add_argument("--json", action="store_true", help="emit a versioned JSON doctor report")
     return parser.parse_args(argv)
 
@@ -827,7 +970,14 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     arguments = parse_arguments(argv if argv is not None else sys.argv[1:])
     try:
-        candidate = parse_candidate(arguments.image, arguments.revision)
+        if arguments.manifest is not None:
+            if arguments.image is not None or arguments.revision is not None:
+                raise DeploymentError("--manifest cannot be combined with --image or --revision")
+            candidate = parse_release_manifest(arguments.manifest.expanduser().resolve())
+        elif arguments.image is not None and arguments.revision is not None:
+            candidate = parse_candidate(arguments.image, arguments.revision)
+        else:
+            raise DeploymentError("provide --manifest or both --image and --revision")
         config = DeploymentConfig.from_file(arguments.config.expanduser().resolve())
         deployment = SingleHostDeployment(config, candidate)
         if arguments.command == "doctor":

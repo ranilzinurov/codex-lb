@@ -92,8 +92,7 @@ sudoedit /etc/codex-lb/deployment.env
 ```bash
 sudo ./deploy/single-host/deploy.py doctor \
   --config /etc/codex-lb/deployment.env \
-  --image ghcr.io/ranilzinurov/codex-lb@sha256:<64-hex-digest> \
-  --revision <40-hex-git-revision>
+  --manifest /path/to/release-manifest-<sha-prefix>.json
 ```
 
 Для оркестратора добавьте `--json`. Версионированный отчёт
@@ -105,16 +104,20 @@ deploy state, свободного места, data volume и каталога �
 
 ## Развёртывание
 
-CI main-ветки выводит digest и Git revision в итогах задания Docker. Передайте
-оба значения без SHA-тега: тег — только вспомогательная ссылка, не входные
-данные развёртывания.
+Передайте на сервер готовый манифест локального выпуска. Deploy принимает его
+только при `schema_version: 1`, `ready: true`, платформе `linux/amd64`, точном
+`repository@sha256:...` и успешных воротах validation/revision/security.
+Изменяемый SHA-тег не является входными данными.
 
 ```bash
 sudo ./deploy/single-host/deploy.py \
   --config /etc/codex-lb/deployment.env \
-  --image ghcr.io/ranilzinurov/codex-lb@sha256:<64-hex-digest> \
-  --revision <40-hex-git-revision>
+  --manifest /path/to/release-manifest-<sha-prefix>.json
 ```
+
+Для ручного аварийного запуска сохраняется форма
+`--image <repository@digest> --revision <full-sha>`; тег без digest отклоняется
+до остановки сервиса.
 
 Команда сначала запускает `docker compose config -q`, проверяет защищённость
 файла секретов и выводит отчёт вида `required=…MiB available=…MiB` до любого
@@ -134,6 +137,19 @@ Docker prune не используется. Если порог не дости�
 образы, volume и файлы не выбираются. Docker-логи контейнера
 ограничены драйвером `local` (`3 × 10 MiB`), а удаляются только файлы
 `codex-lb-deploy-*.sqlite` из `DEPLOY_BACKUP_DIR`.
+
+До остановки и после готовности кандидата команда формирует отпечаток
+`schema_version: 1`. Он содержит идентификатор volume/пути БД, счётчики
+`accounts`, `api_keys`, `model_sources`, `automation_jobs` и только SHA-256
+защищённых значений. Идентификаторы строк и исходные токены, API-ключи, пароли
+и секреты в state и вывод не попадают. Новые записи и рост счётчиков допустимы;
+смена хранилища, уменьшение счётчика, исчезновение либо изменение существующего
+защищённого значения вызывают откат.
+
+`known-good.json` фиксирует фактически активный digest и последний успешный
+отпечаток. Журнал `/var/lib/codex-lb-deploy/deploy-events.jsonl` с правами
+`0600` записывает успешное развёртывание, недоступность/ошибку отката либо
+фактически восстановленный предыдущий digest без секретов.
 
 ## Резервная копия и ручное восстановление SQLite
 

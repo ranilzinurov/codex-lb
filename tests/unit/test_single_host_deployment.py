@@ -72,6 +72,45 @@ def test_parse_candidate_requires_digest_and_revision() -> None:
         deploy.parse_candidate(candidate.image, "not-a-revision")
 
 
+def test_release_manifest_requires_ready_digest_and_matching_revision(tmp_path: Path) -> None:
+    candidate = _candidate()
+    manifest = tmp_path / "candidate.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "repository": "ghcr.io/example/codex-lb",
+                "revision": candidate.revision,
+                "digest": "sha256:" + "a" * 64,
+                "image": candidate.image,
+                "platform": "linux/amd64",
+                "ready": True,
+                "gates": {
+                    "validation": {"status": "passed"},
+                    "revision": {"status": "passed"},
+                    "security": {"status": "passed"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert deploy.parse_release_manifest(manifest) == candidate
+
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    payload["ready"] = False
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(deploy.DeploymentError, match="not ready"):
+        deploy.parse_release_manifest(manifest)
+
+    payload["ready"] = True
+    payload["repository"] = "ghcr.io/example/codex-lb:latest"
+    payload["image"] = payload["repository"] + "@" + payload["digest"]
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(deploy.DeploymentError, match="untagged"):
+        deploy.parse_release_manifest(manifest)
+
+
 def test_runtime_environment_must_not_be_group_or_world_readable(tmp_path: Path) -> None:
     runtime = tmp_path / "runtime.env"
     _write_runtime_environment(runtime, 0o644)
@@ -89,7 +128,17 @@ def test_runtime_environment_must_not_be_group_or_world_readable(tmp_path: Path)
 
 def test_deployment_state_round_trip_rejects_duplicate_managed_images(tmp_path: Path) -> None:
     candidate = _candidate()
-    state = deploy.DeploymentState(active=candidate, managed_images=(candidate.image,))
+    active_fingerprint = deploy.StateFingerprint(
+        schema_version=1,
+        storage_id="volume:codex-lb-data:/var/lib/codex-lb/store.db",
+        record_counts={"accounts": 2},
+        protected_hashes={"env:OPENAI_API_KEY": "a" * 64},
+    )
+    state = deploy.DeploymentState(
+        active=candidate,
+        managed_images=(candidate.image,),
+        active_fingerprint=active_fingerprint,
+    )
     path = tmp_path / "state.json"
 
     state.write(path)
@@ -105,6 +154,31 @@ def test_deployment_state_round_trip_rejects_duplicate_managed_images(tmp_path: 
     path.write_text('{"active": {"image": "not-a-digest"}, "previous": null}', encoding="utf-8")
     with pytest.raises(deploy.DeploymentError, match="invalid active"):
         deploy.DeploymentState.load(path)
+
+
+def test_successful_rollback_records_actual_digest_and_event(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    config.state_dir.mkdir()
+    candidate = _candidate("a")
+    active = _candidate("b")
+    older = _candidate("c")
+    state = deploy.DeploymentState(
+        active=active,
+        previous=older,
+        managed_images=(active.image, older.image),
+    )
+    deployment = deploy.SingleHostDeployment(config, candidate)
+    deployment._compose = lambda *args, **kwargs: None  # type: ignore[method-assign]
+    deployment._start = lambda image: None  # type: ignore[method-assign]
+    deployment._wait_for_readiness = lambda image: None  # type: ignore[method-assign]
+
+    deployment._rollback(active, None, deploy.DeploymentError("candidate unhealthy"), state)
+
+    restored = deploy.DeploymentState.load(config.state_file)
+    event = json.loads(config.event_log_file.read_text(encoding="utf-8").splitlines()[-1])
+    assert restored.active == active
+    assert event["outcome"] == "rollback_succeeded"
+    assert event["running"]["image"] == active.image
 
 
 def test_disk_preflight_reports_and_rejects_insufficient_space(
