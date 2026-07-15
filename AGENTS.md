@@ -6,6 +6,20 @@
 - GitHub auth for git/API is available via env vars: `GITHUB_USER`, `GITHUB_TOKEN` (PAT). Do not hardcode or commit tokens.
 - For authenticated git over HTTPS in automation, use: `https://x-access-token:${GITHUB_TOKEN}@github.com/<owner>/<repo>.git`
 
+## Agent skills
+
+### Issue tracker
+
+Задачи ведутся в GitHub Issues репозитория `ranilzinurov/codex-lb`. См. `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Используются стандартные метки triage. См. `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Репозиторий использует single-context-размещение документации предметной области. См. `docs/agents/domain.md`.
+
 ## Code Conventions
 
 The `/project-conventions` skill is auto-activated on code edits (PreToolUse guard).
