@@ -150,6 +150,9 @@ The `local-ci` hook runs `make ci`, which is the local
 version of the GitHub Actions CI gate. You can also run a single CI job while
 iterating, for example:
 
+The Helm smoke target creates a temporary `codex-lb-smoke` kind cluster and
+deletes it on both successful and failed completion.
+
 ```bash
 make lint
 make test-unit

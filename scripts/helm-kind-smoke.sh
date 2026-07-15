@@ -11,6 +11,7 @@ IMAGE_REPOSITORY="${IMAGE_REPOSITORY:-soju06/codex-lb}"
 IMAGE_TAG="${IMAGE_TAG:-ci}"
 DB_PASSWORD="${DB_PASSWORD:-smoke-password}"
 HELM_TEST_TIMEOUT="${HELM_TEST_TIMEOUT:-60s}"
+PYTHON_BIN="${PYTHON:-python3}"
 
 log_step() {
   printf '[%s] [helm-kind-smoke] %s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$*" >&2
@@ -126,7 +127,7 @@ install_external_db() {
 
   trap 'dump_namespace_debug "${namespace}"' ERR
 
-  encryption_key=$(python - <<'PY'
+  encryption_key=$("${PYTHON_BIN}" - <<'PY'
 import base64
 import os
 

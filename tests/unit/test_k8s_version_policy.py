@@ -25,6 +25,7 @@ def test_ci_uses_1_32_minimum_and_1_35_baseline() -> None:
     assert "for version in 1.32.0 1.35.0" in makefile
     assert '-kubernetes-version "$${version}"' in makefile
     assert "kind create cluster --name codex-lb-smoke --image kindest/node:v1.35.0 --wait 120s" in makefile
+    assert "trap 'kind delete cluster --name codex-lb-smoke" in makefile
     assert "kubeconform (K8s 1.25.0)" not in workflow
     assert "kubeconform (K8s 1.28.0)" not in workflow
     assert "kubeconform (K8s 1.31.0)" not in workflow

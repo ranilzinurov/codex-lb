@@ -462,6 +462,13 @@ def test_kind_smoke_bounds_helm_test_wait() -> None:
     ) in script
 
 
+def test_kind_smoke_uses_portable_host_python_command() -> None:
+    script = (_REPO_ROOT / "scripts" / "helm-kind-smoke.sh").read_text()
+
+    assert 'PYTHON_BIN="${PYTHON:-python3}"' in script
+    assert "encryption_key=$(\"${PYTHON_BIN}\" - <<'PY'" in script
+
+
 def test_auto_advertise_bridge_url_uses_service_port() -> None:
     rendered = _helm_template(
         "--show-only",
