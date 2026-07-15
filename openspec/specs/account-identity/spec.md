@@ -1,7 +1,8 @@
 # account-identity Specification
 
 ## Purpose
-TBD - created by archiving change fix-shared-workspace-account-slots. Update Purpose after archive.
+Define how imported and OAuth-completed credentials map to stable local account
+rows without collapsing distinct email or workspace slots.
 ## Requirements
 ### Requirement: Shared upstream workspace identities preserve account slots
 
@@ -22,3 +23,28 @@ Dashboard account summaries MUST expose and render the upstream ChatGPT account 
 - **THEN** it displays the ChatGPT account id
 - **AND** it does not display the generic unknown-workspace label
 
+### Requirement: Re-import preserves an existing credential slot
+
+Account import and OAuth completion MUST update the existing local row when the
+incoming credential has the same ChatGPT account id, real email, and workspace
+slot. This identity rule applies when import-without-overwrite mode is enabled,
+so repeated authentication does not detach request logs, usage history, API-key
+attribution, or external Codex usage from the active account.
+
+Different real emails or different workspace ids/labels MUST remain separate
+local account slots even when their upstream ChatGPT account id is shared.
+
+#### Scenario: Same credential slot is imported again
+
+- **GIVEN** import-without-overwrite mode is enabled
+- **AND** an existing account has a ChatGPT account id, email, and workspace slot
+- **WHEN** a credential with the same identity tuple is imported again
+- **THEN** the service updates the existing local account row and its tokens
+- **AND** it does not create an `__copy` row
+
+#### Scenario: Shared upstream identity has different workspace slots
+
+- **GIVEN** two credentials share a ChatGPT account id and email
+- **AND** their workspace ids or workspace labels differ
+- **WHEN** both credentials are imported
+- **THEN** the service preserves two local account rows

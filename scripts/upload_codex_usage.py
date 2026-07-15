@@ -75,7 +75,7 @@ def _current_codex_weekly_window(codex_home: Path) -> tuple[float, float] | None
                     timestamp = _iso_to_timestamp(timestamp_raw)
                     if timestamp is None or timestamp < latest_seen_at:
                         continue
-                    secondary = ((payload.get("rate_limits") or {}).get("secondary") or {})
+                    secondary = (payload.get("rate_limits") or {}).get("secondary") or {}
                     resets_at = secondary.get("resets_at")
                     window_minutes = secondary.get("window_minutes")
                     if not isinstance(resets_at, (int, float)) or not isinstance(window_minutes, (int, float)):
@@ -131,7 +131,7 @@ def _collect_buckets(
                         continue
                     if timestamp < since_timestamp:
                         continue
-                    usage = ((payload.get("info") or {}).get("last_token_usage") or {})
+                    usage = (payload.get("info") or {}).get("last_token_usage") or {}
                     if not isinstance(usage, dict):
                         continue
                     total_tokens = int(usage.get("total_tokens") or 0)

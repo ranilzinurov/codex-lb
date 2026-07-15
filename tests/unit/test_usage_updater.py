@@ -2054,6 +2054,7 @@ class StubAccountsRepository:
     def __init__(self) -> None:
         self.status_updates: list[dict[str, Any]] = []
         self.metadata_updates: list[dict[str, Any]] = []
+        self.token_updates: list[dict[str, Any]] = []
         self.accounts_by_id: dict[str, Account] = {}
         self.taken_workspace_slots: set[tuple[str, str | None, str]] = set()
 
@@ -2130,9 +2131,16 @@ class StubAccountsRepository:
         workspace_label: str | None = None,
         seat_type: str | None = None,
     ) -> bool:
-        # The usage updater never rotates token material through its accounts
-        # repo (that path lives in AuthManager). Present only to satisfy the
-        # AccountsRepositoryPort protocol.
+        self.token_updates.append(
+            {
+                "account_id": account_id,
+                "access_token_encrypted": access_token_encrypted,
+                "refresh_token_encrypted": refresh_token_encrypted,
+                "id_token_encrypted": id_token_encrypted,
+                "last_refresh": last_refresh,
+                "expected_refresh_token_encrypted": expected_refresh_token_encrypted,
+            }
+        )
         return True
 
     async def update_account_metadata(self, *args: Any, **kwargs: Any) -> bool:

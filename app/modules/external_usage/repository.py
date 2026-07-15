@@ -38,7 +38,7 @@ class ExternalUsageRepository:
                         RequestLog.source == source,
                         RequestLog.request_id.in_(list(request_ids)),
                     )
-            )
+                )
             for log in logs:
                 log.cost_usd = calculated_cost_from_log(typing_cast(RequestLogLike, log))
                 self._session.add(log)

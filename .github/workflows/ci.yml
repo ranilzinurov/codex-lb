@@ -743,7 +743,10 @@ jobs:
           IMAGE_TAG="${IMAGE_REPOSITORY}:sha-${GITHUB_SHA}"
           docker tag codex-lb:ci "${IMAGE_TAG}"
           docker push "${IMAGE_TAG}"
-          DIGEST="$(docker buildx imagetools inspect "${IMAGE_TAG}" --format '{{.Digest}}')"
+          MANIFEST_FILE="$(mktemp)"
+          trap 'rm -f "${MANIFEST_FILE}"' EXIT
+          docker buildx imagetools inspect "${IMAGE_TAG}" --raw > "${MANIFEST_FILE}"
+          DIGEST="sha256:$(sha256sum "${MANIFEST_FILE}" | awk '{print $1}')"
           [[ "${DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]] || {
             echo "Invalid registry digest: ${DIGEST}" >&2
             exit 1

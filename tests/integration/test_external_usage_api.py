@@ -95,11 +95,7 @@ async def test_external_codex_usage_ingest_writes_synthetic_request_logs(async_c
 
     async with SessionLocal() as session:
         rows = list(
-            (
-                await session.execute(
-                    select(RequestLog).where(RequestLog.source.like("external_codex_usage:ranil:%"))
-                )
-            )
+            (await session.execute(select(RequestLog).where(RequestLog.source.like("external_codex_usage:ranil:%"))))
             .scalars()
             .all()
         )
@@ -128,11 +124,7 @@ async def test_external_codex_usage_ingest_writes_synthetic_request_logs(async_c
 
     async with SessionLocal() as session:
         rows = list(
-            (
-                await session.execute(
-                    select(RequestLog).where(RequestLog.source.like("external_codex_usage:ranil:%"))
-                )
-            )
+            (await session.execute(select(RequestLog).where(RequestLog.source.like("external_codex_usage:ranil:%"))))
             .scalars()
             .all()
         )

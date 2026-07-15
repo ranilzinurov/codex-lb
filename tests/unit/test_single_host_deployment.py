@@ -183,3 +183,29 @@ def test_verify_backup_checks_sqlite_integrity(tmp_path: Path) -> None:
     invalid.write_text("not a sqlite database", encoding="utf-8")
     with pytest.raises(deploy.DeploymentError, match="cannot be opened"):
         deploy.SingleHostDeployment._verify_backup(invalid)
+
+
+def test_backup_container_writes_as_deployment_user(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = _config(tmp_path)
+    config.backup_dir.mkdir()
+    deployment = deploy.SingleHostDeployment(config, _candidate())
+    commands: list[list[str]] = []
+
+    monkeypatch.setattr(deploy.os, "getuid", lambda: 1001)
+    monkeypatch.setattr(deploy.os, "getgid", lambda: 1002)
+
+    def fake_run(command: list[str], **kwargs: object) -> CompletedProcess[str]:
+        del kwargs
+        commands.append(command)
+        if command[:3] == ["docker", "volume", "inspect"]:
+            return CompletedProcess(command, 0, "[]", "")
+        return CompletedProcess(command, 20, "", "")
+
+    deployment._run_command = fake_run  # type: ignore[method-assign]
+
+    assert deployment._backup_sqlite() is None
+    docker_run = commands[1]
+    user_index = docker_run.index("--user")
+    assert docker_run[user_index + 1] == "1001:1002"
+    volume_mount = next(argument for argument in docker_run if argument.startswith("type=volume"))
+    assert volume_mount == "type=volume,src=codex-lb-data,dst=/var/lib/codex-lb"

@@ -358,6 +358,9 @@ def _latest_by_account_sqlite(
     else:
         window_clause = "window = ?"
         window_params = [window]
+    semantic_order = ""
+    if not window or window == "primary":
+        semantic_order = "case when window_minutes is null or window_minutes in (300, 10080) then 0 else 1 end asc, "
     latest_sql = f"""
         select id, account_id, recorded_at, window, used_percent,
                input_tokens, output_tokens, reset_at, window_minutes,
@@ -365,7 +368,7 @@ def _latest_by_account_sqlite(
         from usage_history
         where account_id = ?
           and {window_clause}
-        order by recorded_at desc, id desc
+        order by {semantic_order}recorded_at desc, id desc
         limit 1
     """
 

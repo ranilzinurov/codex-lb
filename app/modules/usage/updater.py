@@ -675,13 +675,6 @@ class UsageUpdater:
             return AccountRefreshResult(usage_written=additional_synced)
         if primary and _is_long_non_primary_window(primary.limit_window_seconds):
             primary = None
-        # This is a special case that if the account type is free (or probably go)
-        # The 7d stat is in primary window instead of secondary window
-        # (that is widely defined as 7d in the ui)
-        # This will cause the account usage trend is "primary" instead of "secondary"
-        if primary and primary.limit_window_seconds == 604800:
-            secondary = rate_limit.primary_window
-            primary = None
         credits_has, credits_unlimited, credits_balance = _credits_snapshot(payload)
         usage_written = False
 
@@ -955,12 +948,16 @@ def _payload_mismatches_account_slot(account: Account, payload: UsagePayload) ->
         # introduces "free" or an unrecognized plan stays untrusted -- the
         # signature of a degraded or wrong-identity usage response that must not
         # silently rewrite the stored plan.
-        if payload_plan_type != stored_plan_type and not preserve_paid_plan and not (
-            (stored_plan_type == "unknown" and normalized_payload_plan_type in recognized_paid_plans)
-            or (
-                not account.workspace_id
-                and stored_plan_type in ACCOUNT_PLAN_TYPES
-                and payload_plan_type in recognized_paid_plans
+        if (
+            payload_plan_type != stored_plan_type
+            and not preserve_paid_plan
+            and not (
+                (stored_plan_type == "unknown" and normalized_payload_plan_type in recognized_paid_plans)
+                or (
+                    not account.workspace_id
+                    and stored_plan_type in ACCOUNT_PLAN_TYPES
+                    and payload_plan_type in recognized_paid_plans
+                )
             )
         ):
             return True
@@ -1225,8 +1222,13 @@ def _should_ignore_free_plan_downgrade(
     next_plan_type: str,
     payload: UsagePayload,
 ) -> bool:
-    del payload
-    return next_plan_type == "free" and current_plan_type not in {None, "", "free"}
+    rate_limit = payload.rate_limit
+    return (
+        next_plan_type == "free"
+        and coerce_account_plan_type(current_plan_type, "free") in ACCOUNT_PLAN_TYPES - {"free"}
+        and rate_limit is not None
+        and rate_limit.primary_window is not None
+    )
 
 
 def _now_epoch() -> int:

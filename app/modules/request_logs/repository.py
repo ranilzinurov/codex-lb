@@ -22,6 +22,7 @@ from app.db.session import sqlite_writer_section
 
 _EXTERNAL_CODEX_USAGE_TRANSPORT = "external_codex_usage"
 
+
 @dataclass(frozen=True, slots=True)
 class _RequestLogFilters:
     conditions: list

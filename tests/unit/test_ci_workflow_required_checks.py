@@ -64,3 +64,11 @@ def test_postgres_real_test_steps_still_run_only_for_backend_changes() -> None:
     ):
         step = pg_job.split(f"- name: {step_name}", maxsplit=1)[1]
         assert step.lstrip().startswith("if: needs.changes.outputs.backend == 'true'")
+
+
+def test_docker_publish_computes_oci_digest_from_raw_manifest() -> None:
+    docker_job = _job_block(_ci_workflow_text(), "docker")
+
+    assert 'imagetools inspect "${IMAGE_TAG}" --raw > "${MANIFEST_FILE}"' in docker_job
+    assert 'sha256sum "${MANIFEST_FILE}"' in docker_job
+    assert "--format '{{.Digest}}'" not in docker_job

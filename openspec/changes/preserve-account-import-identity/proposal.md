@@ -9,7 +9,8 @@ active account.
 ## What Changes
 
 - Preserve the existing local account row whenever an import/OAuth completion
-  carries a `chatgpt_account_id` that is already known.
+  carries the same `chatgpt_account_id`, real email, and workspace slot that
+  are already known.
 - Keep `importWithoutOverwrite` behavior for genuinely different upstream
   accounts that share an email address.
 
@@ -17,5 +18,5 @@ active account.
 
 - Account re-login remains stable for request logs, usage history, dashboard
   attribution, and local external Codex usage uploads.
-- Operators can still intentionally keep separate records for different
-  ChatGPT accounts using the same email.
+- Operators can still keep separate records for different ChatGPT accounts,
+  emails, or workspace slots.
