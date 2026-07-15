@@ -646,7 +646,16 @@ finally:
         current_container = self._container_metadata()
         current_id = current_container.get("Id") if isinstance(current_container, dict) else None
         listed = self._run_command(
-            ["docker", "ps", "--all", "--quiet", "--filter", f"label={MANAGED_CONTAINER_LABEL}"], capture_output=True
+            [
+                "docker",
+                "ps",
+                "--all",
+                "--no-trunc",
+                "--quiet",
+                "--filter",
+                f"label={MANAGED_CONTAINER_LABEL}",
+            ],
+            capture_output=True,
         )
         for container_id in (item for item in listed.stdout.splitlines() if item and item != current_id):
             self._run_command(["docker", "rm", "--force", container_id])

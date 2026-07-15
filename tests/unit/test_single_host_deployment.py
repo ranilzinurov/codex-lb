@@ -130,17 +130,19 @@ def test_prune_keeps_active_and_one_previous_without_touching_foreign_images(tmp
     foreign_image = "alpine:3.21"
     deployment = deploy.SingleHostDeployment(config, active)
     seen: list[list[str]] = []
+    active_container_id = "d" * 64
+    stale_container_id = "e" * 64
 
     def fake_run(command: list[str], **kwargs: object) -> CompletedProcess[str]:
         seen.append(command)
         if command[:3] == ["docker", "ps", "--all"]:
-            return CompletedProcess(command, 0, "stale-managed-container\n", "")
+            return CompletedProcess(command, 0, f"{active_container_id}\n{stale_container_id}\n", "")
         if command[:3] == ["docker", "image", "rm"]:
             return CompletedProcess(command, 0, "", "")
         return CompletedProcess(command, 0, "", "")
 
     deployment._run_command = fake_run  # type: ignore[method-assign]
-    deployment._container_metadata = lambda: {"Id": "active-managed-container"}  # type: ignore[method-assign]
+    deployment._container_metadata = lambda: {"Id": active_container_id}  # type: ignore[method-assign]
     state = deploy.DeploymentState(
         active=active,
         previous=previous,
@@ -150,9 +152,19 @@ def test_prune_keeps_active_and_one_previous_without_touching_foreign_images(tmp
     remaining = deployment._prune_deployment_artifacts(state)
 
     assert remaining == tuple(sorted((active.image, previous.image)))
+    assert [
+        "docker",
+        "ps",
+        "--all",
+        "--no-trunc",
+        "--quiet",
+        "--filter",
+        f"label={deploy.MANAGED_CONTAINER_LABEL}",
+    ] in seen
     assert ["docker", "image", "rm", historical.image] in seen
     assert all(foreign_image not in command for command in seen)
-    assert ["docker", "rm", "--force", "stale-managed-container"] in seen
+    assert ["docker", "rm", "--force", active_container_id] not in seen
+    assert ["docker", "rm", "--force", stale_container_id] in seen
 
 
 def test_backup_retention_only_removes_deployment_owned_files(tmp_path: Path) -> None:
