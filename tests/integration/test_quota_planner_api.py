@@ -383,7 +383,7 @@ async def test_quota_planner_warm_now_keeps_bootstrap_for_metadata_less_primary_
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["status"] == "executed"
+    assert payload["status"] == "executed", payload
 
 
 @pytest.mark.asyncio
