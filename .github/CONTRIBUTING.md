@@ -137,8 +137,23 @@ iterating, for example:
 ```bash
 make lint
 make test-unit
+make fork-contract
 make package
 ```
+
+`make fork-contract` — быстрый обязательный набор для возможностей, которые
+поддерживаются в форке: single-host deployment, внешнее потребление Codex,
+атрибуция dashboard, сохранение identity при импорте и нативная генерация
+изображений. Используйте его во время разработки вместе с тестами изменяемого
+модуля. Полный `make ci` выполняется один раз на итоговом SHA перед выпуском.
+
+GitHub CI применяет один классификатор путей к pull request, merge queue и push
+в `main`. Изменения только документации или single-host deployment не запускают
+несвязанные runtime-наборы; изменения приложения, зависимостей, миграций,
+Docker-контракта и общих правил CI повышают проверку до полной. После переноса
+upstream-коммитов обновите `UPSTREAM_BASE` на интегрированный upstream SHA — это
+явно включает полный набор. Полный запуск также доступен вручную через
+`workflow_dispatch` с `full_suite=true`.
 
 ## Commit & PR conventions
 

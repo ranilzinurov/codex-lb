@@ -26,6 +26,7 @@ help:
 	  '  make test-unit               unit pytest slice, same as CI' \
 	  '  make test-integration-core   integration-core pytest slice' \
 	  '  make package                 build and verify sdist/wheel' \
+	  '  make fork-contract           fast contract for fork-owned behaviour' \
 	  '  make ci-fast                 lint/type/frontend/unit/package' \
 	  '  make ci                      full local CI gate'
 
@@ -120,6 +121,11 @@ migration-check-postgres:
 	uv sync --dev --frozen
 	uv run codex-lb-db --db-url "$(POSTGRES_TEST_DATABASE_URL)" upgrade head
 	uv run codex-lb-db --db-url "$(POSTGRES_TEST_DATABASE_URL)" check
+
+.PHONY: fork-contract
+fork-contract: frontend-install
+	uv sync --dev --frozen
+	PYTHONFAULTHANDLER=1 uv run python -m scripts.fork_contract
 
 .PHONY: package
 package: frontend-build

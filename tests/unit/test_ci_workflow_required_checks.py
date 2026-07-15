@@ -1,11 +1,20 @@
 import re
+import subprocess
 from pathlib import Path
 
+import pytest
+import yaml
+
 CI_WORKFLOW = Path(__file__).parents[2] / ".github" / "workflows" / "ci.yml"
+MAKEFILE = Path(__file__).parents[2] / "Makefile"
 
 
 def _ci_workflow_text() -> str:
     return CI_WORKFLOW.read_text(encoding="utf-8")
+
+
+def _ci_workflow() -> dict:
+    return yaml.safe_load(_ci_workflow_text())
 
 
 def _job_block(text: str, job_name: str) -> str:
@@ -72,3 +81,73 @@ def test_docker_publish_computes_oci_digest_from_raw_manifest() -> None:
     assert 'imagetools inspect "${IMAGE_TAG}" --raw > "${MANIFEST_FILE}"' in docker_job
     assert 'sha256sum "${MANIFEST_FILE}"' in docker_job
     assert "--format '{{.Digest}}'" not in docker_job
+
+
+def test_change_detection_uses_one_tested_scope_classifier_for_every_event() -> None:
+    workflow = _ci_workflow()
+    events = workflow.get("on", workflow[True])
+    outputs = workflow["jobs"]["changes"]["outputs"]
+
+    assert {"push", "pull_request", "merge_group", "workflow_dispatch"} <= events.keys()
+    assert events["workflow_dispatch"]["inputs"]["full_suite"]["default"] is True
+    assert {
+        "frontend",
+        "backend",
+        "helm",
+        "docker",
+        "migrations",
+        "fork_contract",
+        "full_suite",
+    } <= outputs.keys()
+
+
+def test_fork_contract_required_context_uses_placeholder_for_unrelated_changes() -> None:
+    fork_contract_job = _ci_workflow()["jobs"]["fork-contract"]
+    steps = fork_contract_job["steps"]
+
+    assert fork_contract_job["name"] == "Fork contract"
+    assert "if" not in fork_contract_job
+    assert any(step.get("if") == "needs.changes.outputs.fork_contract != 'true'" for step in steps)
+    assert any(step.get("run") == "make fork-contract" for step in steps)
+
+
+def test_makefile_exposes_documented_fork_contract_target() -> None:
+    result = subprocess.run(
+        ["make", "--dry-run", "fork-contract"],
+        cwd=MAKEFILE.parent,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    ("job_name", "scope_output"),
+    (
+        ("frontend-lint", "frontend"),
+        ("frontend-typecheck", "frontend"),
+        ("frontend-test", "frontend"),
+        ("frontend-build", "frontend"),
+        ("lint", "backend"),
+        ("typecheck", "backend"),
+        ("migration-check", "migrations"),
+        ("migration-check-postgres", "migrations"),
+        ("package", "backend"),
+        ("docker", "docker"),
+        ("helm-lint", "helm"),
+        ("helm-smoke-kind", "helm"),
+    ),
+)
+def test_required_jobs_use_successful_placeholders_for_unrelated_changes(
+    job_name: str,
+    scope_output: str,
+) -> None:
+    job = _ci_workflow()["jobs"][job_name]
+    steps = job["steps"]
+
+    assert job["name"]
+    assert f"needs.changes.outputs.{scope_output} == 'true'" not in job.get("if", "")
+    placeholder_condition = f"needs.changes.outputs.{scope_output} != 'true'"
+    assert any(placeholder_condition in step.get("if", "") and step.get("run") for step in steps)
