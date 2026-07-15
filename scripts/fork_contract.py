@@ -9,6 +9,7 @@ PYTEST_TARGETS = (
     "tests/unit/test_ci_scope.py",
     "tests/unit/test_ci_workflow_required_checks.py",
     "tests/unit/test_single_host_deployment.py",
+    "tests/unit/test_single_host_fingerprint.py",
     "tests/unit/test_upload_codex_usage.py",
     "tests/integration/test_external_usage_api.py",
     "tests/integration/test_accounts_api_extended.py::test_import_overwrites_for_same_account_identity_when_overwrite_enabled",
@@ -33,7 +34,11 @@ FORK_CONTRACT_PATHS = (
     *(target.partition("::")[0] for target in PYTEST_TARGETS),
     *(f"frontend/{target}" for target in FRONTEND_TARGETS),
 )
-FORK_ONLY_TEST_PATHS = tuple(target for target in PYTEST_TARGETS if "::" not in target)
+FORK_ONLY_TEST_PATHS = (
+    *(target for target in PYTEST_TARGETS if "::" not in target),
+    "tests/unit/test_single_host_*.py",
+    "tests/integration/test_single_host_docker_lifecycle.py",
+)
 PYTEST_OPTIONS = (
     "-q",
     "-ra",

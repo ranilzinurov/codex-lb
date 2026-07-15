@@ -47,6 +47,7 @@ jobs:
       docker: ${{ steps.scope.outputs.docker }}
       migrations: ${{ steps.scope.outputs.migrations }}
       fork_contract: ${{ steps.scope.outputs.fork_contract }}
+      single_host_lifecycle: ${{ steps.scope.outputs.single_host_lifecycle }}
       full_suite: ${{ steps.scope.outputs.full_suite }}
     steps:
       - name: Checkout repository
@@ -124,6 +125,30 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: python .github/scripts/check_all_contributors.py
+
+  single-host-lifecycle:
+    name: Single-host Docker lifecycle
+    runs-on: ubuntu-24.04
+    needs: changes
+
+    steps:
+      - name: Skip single-host lifecycle for unrelated changes
+        if: needs.changes.outputs.single_host_lifecycle != 'true'
+        run: echo "Single-host runtime unchanged; required context satisfied."
+
+      - name: Checkout repository
+        if: needs.changes.outputs.single_host_lifecycle == 'true'
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        if: needs.changes.outputs.single_host_lifecycle == 'true'
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c
+
+      - name: Test deploy, update, state preservation, and rollback
+        if: needs.changes.outputs.single_host_lifecycle == 'true'
+        run: make single-host-lifecycle-test
 
   beta-release-guard:
     name: Beta release guard
@@ -1049,6 +1074,7 @@ jobs:
     needs:
       - changes
       - fork-contract
+      - single-host-lifecycle
       - contributors
       - beta-release-guard
       - frontend-lint

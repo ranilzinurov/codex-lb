@@ -407,7 +407,11 @@ class SingleHostDeployment:
         return "Compose configuration is valid"
 
     def _doctor_registry(self) -> str:
-        self._run_command(["docker", "manifest", "inspect", self.candidate.image], capture_output=True)
+        command = ["docker", "manifest", "inspect"]
+        registry = self.candidate.image.split("/", 1)[0].split(":", 1)[0]
+        if registry in {"127.0.0.1", "localhost", "::1"}:
+            command.append("--insecure")
+        self._run_command([*command, self.candidate.image], capture_output=True)
         return "Candidate digest is reachable in the registry"
 
     def _doctor_state(self) -> str:
@@ -557,7 +561,10 @@ class SingleHostDeployment:
         return result
 
     def _available_space_mb(self) -> int:
-        result = self._run_command(["df", "-Pm", str(self.config.state_dir)], capture_output=True)
+        existing = self.config.state_dir
+        while not existing.exists() and existing != existing.parent:
+            existing = existing.parent
+        result = self._run_command(["df", "-Pm", str(existing)], capture_output=True)
         lines = result.stdout.splitlines()
         if len(lines) < 2:
             raise DeploymentError(f"Cannot read free space from df output: {result.stdout!r}")

@@ -28,6 +28,7 @@ help:
 	  '  make test-integration-core   integration-core pytest slice' \
 	  '  make package                 build and verify sdist/wheel' \
 	  '  make fork-contract           fast contract for fork-owned behaviour' \
+	  '  make single-host-lifecycle-test  isolated deploy/update/rollback Docker test' \
 	  '  make release-local-dry-run   validate a local GHCR release plan' \
 	  '  make release-local           publish linux/amd64 candidate to GHCR' \
 	  '  make ci-fast                 lint/type/frontend/unit/package' \
@@ -144,6 +145,10 @@ fork-contract: frontend-install
 	uv sync --dev --frozen
 	PYTHONFAULTHANDLER=1 uv run python -m scripts.fork_contract
 
+.PHONY: single-host-lifecycle-test
+single-host-lifecycle-test:
+	python deploy/single-host/lifecycle_test.py --json
+
 .PHONY: package
 package: frontend-build
 	uv sync --frozen --no-dev
@@ -212,4 +217,4 @@ ci-fast: lint typecheck frontend-test test-unit package
 
 ci: frontend-lint frontend-typecheck frontend-test frontend-build lint typecheck \
 	test-unit test-integration-core test-integration-bridge test-e2e test-postgres \
-	migration-check migration-check-postgres package docker helm-check helm-smoke-kind
+	migration-check migration-check-postgres package docker single-host-lifecycle-test helm-check helm-smoke-kind

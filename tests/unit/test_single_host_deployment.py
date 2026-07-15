@@ -237,6 +237,44 @@ def test_doctor_reports_checks_without_changing_server_state(tmp_path: Path) -> 
     assert all(not mutating.intersection(command) for command in commands)
 
 
+def test_doctor_uses_insecure_manifest_inspection_only_for_loopback_registry(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    candidate = deploy.KnownImage(
+        image="127.0.0.1:5000/codex-lb@sha256:" + "a" * 64,
+        revision="b" * 40,
+    )
+    deployment = deploy.SingleHostDeployment(config, candidate)
+    commands: list[list[str]] = []
+
+    def fake_run(command: list[str], **kwargs: object) -> CompletedProcess[str]:
+        del kwargs
+        commands.append(command)
+        return CompletedProcess(command, 0, "{}", "")
+
+    deployment._run_command = fake_run  # type: ignore[method-assign]
+
+    deployment._doctor_registry()
+
+    assert commands == [["docker", "manifest", "inspect", "--insecure", candidate.image]]
+
+
+def test_disk_space_check_uses_existing_parent_when_state_directory_is_absent(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    deployment = deploy.SingleHostDeployment(config, _candidate())
+    commands: list[list[str]] = []
+
+    def fake_run(command: list[str], **kwargs: object) -> CompletedProcess[str]:
+        del kwargs
+        commands.append(command)
+        output = "Filesystem 1048576-blocks Used Available Capacity Mounted on\n/dev/vda 10000 7000 3000 70% /\n"
+        return CompletedProcess(command, 0, output, "")
+
+    deployment._run_command = fake_run  # type: ignore[method-assign]
+
+    assert deployment._available_space_mb() == 3000
+    assert commands == [["df", "-Pm", str(tmp_path)]]
+
+
 def test_low_space_cleanup_keeps_candidate_active_and_rollback_images(tmp_path: Path) -> None:
     config = _config(tmp_path)
     candidate = _candidate("a")

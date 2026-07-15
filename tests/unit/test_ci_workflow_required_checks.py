@@ -97,6 +97,7 @@ def test_change_detection_uses_one_tested_scope_classifier_for_every_event() -> 
         "docker",
         "migrations",
         "fork_contract",
+        "single_host_lifecycle",
         "full_suite",
     } <= outputs.keys()
 
@@ -125,6 +126,18 @@ def test_makefile_exposes_documented_fork_contract_target() -> None:
     assert result.returncode == 0, result.stderr
 
 
+def test_makefile_exposes_single_host_lifecycle_target() -> None:
+    result = subprocess.run(
+        ["make", "--dry-run", "single-host-lifecycle-test"],
+        cwd=MAKEFILE.parent,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
 @pytest.mark.parametrize(
     ("job_name", "scope_output"),
     (
@@ -138,6 +151,7 @@ def test_makefile_exposes_documented_fork_contract_target() -> None:
         ("migration-check-postgres", "migrations"),
         ("package", "backend"),
         ("docker", "docker"),
+        ("single-host-lifecycle", "single_host_lifecycle"),
         ("helm-lint", "helm"),
         ("helm-smoke-kind", "helm"),
     ),

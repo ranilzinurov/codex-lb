@@ -12,7 +12,21 @@ from typing import Iterable, Sequence
 
 from scripts.fork_contract import FORK_CONTRACT_PATHS, FORK_ONLY_TEST_PATHS
 
-AREA_NAMES = ("frontend", "backend", "helm", "docker", "migrations", "fork_contract")
+AREA_NAMES = (
+    "frontend",
+    "backend",
+    "helm",
+    "docker",
+    "migrations",
+    "fork_contract",
+    "single_host_lifecycle",
+)
+SINGLE_HOST_LIFECYCLE_PATHS = (
+    "deploy/single-host/*.py",
+    "deploy/single-host/docker-compose.yml",
+    "deploy/single-host/fixtures/**",
+    "tests/integration/test_single_host_docker_lifecycle.py",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,6 +37,7 @@ class CiScope:
     docker: bool = False
     migrations: bool = False
     fork_contract: bool = False
+    single_host_lifecycle: bool = False
     reasons: tuple[str, ...] = ()
 
     @property
@@ -104,6 +119,7 @@ def classify_paths(paths: Iterable[str], *, force_full: bool = False, upstream_s
     helm = any(_matches(path, ("deploy/helm/**",)) for path in normalised)
     migrations = any(_matches(path, ("app/db/alembic/**",)) for path in normalised)
     fork_contract = any(_matches(path, FORK_CONTRACT_PATHS) for path in normalised)
+    single_host_lifecycle = any(_matches(path, SINGLE_HOST_LIFECYCLE_PATHS) for path in normalised)
     reasons = (
         ("single-host deployment",) if any(_matches(path, ("deploy/single-host/**",)) for path in normalised) else ()
     )
@@ -113,6 +129,7 @@ def classify_paths(paths: Iterable[str], *, force_full: bool = False, upstream_s
         helm=helm,
         migrations=migrations,
         fork_contract=fork_contract,
+        single_host_lifecycle=single_host_lifecycle,
         reasons=reasons,
     )
 

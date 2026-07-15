@@ -15,11 +15,11 @@ def test_docs_only_change_needs_no_expensive_scope() -> None:
     assert scope.reasons == ()
 
 
-def test_single_host_deploy_change_runs_only_fork_contract() -> None:
+def test_single_host_deploy_change_runs_contract_and_docker_lifecycle() -> None:
     scope = classify_paths(["deploy/single-host/deploy.py"])
 
     assert scope.level == "fast"
-    assert scope.enabled_areas == ("fork_contract",)
+    assert scope.enabled_areas == ("fork_contract", "single_host_lifecycle")
     assert scope.reasons == ("single-host deployment",)
 
 
@@ -55,6 +55,7 @@ def test_runtime_source_change_forces_every_area() -> None:
         "docker",
         "migrations",
         "fork_contract",
+        "single_host_lifecycle",
     )
     assert scope.reasons == ("runtime source",)
 
@@ -77,7 +78,7 @@ def test_explicit_full_suite_overrides_docs_only_scope() -> None:
     scope = classify_paths(["docs/deployment/docker.md"], force_full=True)
 
     assert scope.level == "full"
-    assert len(scope.enabled_areas) == 6
+    assert len(scope.enabled_areas) == 7
     assert scope.reasons == ("explicit full-suite request",)
 
 
