@@ -23,6 +23,7 @@ help:
 	  '  make architecture-check      proxy architecture fitness ratchets' \
 	  '  make typecheck               ty check' \
 	  '  make frontend-test           vitest coverage, same as CI' \
+	  '  make frontend-test-repeat    three blocking full Vitest runs' \
 	  '  make test-unit               unit pytest slice, same as CI' \
 	  '  make test-integration-core   integration-core pytest slice' \
 	  '  make package                 build and verify sdist/wheel' \
@@ -30,7 +31,7 @@ help:
 	  '  make ci-fast                 lint/type/frontend/unit/package' \
 	  '  make ci                      full local CI gate'
 
-.PHONY: frontend-install frontend-lint frontend-typecheck frontend-test frontend-test-fast frontend-build
+.PHONY: frontend-install frontend-lint frontend-typecheck frontend-test frontend-test-fast frontend-test-repeat frontend-build
 frontend-install:
 	cd frontend && bun install --frozen-lockfile
 
@@ -45,6 +46,9 @@ frontend-test: frontend-install
 
 frontend-test-fast: frontend-install
 	cd frontend && bun run test
+
+frontend-test-repeat: frontend-install
+	cd frontend && for run in 1 2 3; do echo "frontend full run $$run/3"; bun run test || exit 1; done
 
 frontend-build: frontend-install
 	cd frontend && bun run build

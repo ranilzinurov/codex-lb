@@ -74,6 +74,22 @@ uv run codex-lb --help
 Frontend (dashboard) lives under `frontend/`. Use the project's standard
 package manager (see `frontend/package.json`).
 
+### Frontend tests
+
+- `make frontend-test-fast` runs the full Vitest suite without coverage and is
+  the fast pull-request command.
+- `make frontend-test` runs the same suite with coverage and is the full CI
+  command.
+- `make frontend-test-repeat` runs the full suite three times and stops on the
+  first failure. Use it after changing Vitest concurrency or shared test setup.
+
+Vitest runs test files with at most two workers. The shared setup resets MSW,
+browser storage, history, timers, mocks, and the rendered DOM after every test.
+Tests that cannot own those resources must use an explicitly named sequential
+group instead of disabling file parallelism globally. The reference local
+measurement for 125 files and 859 tests is 100–104 seconds with two workers;
+the same machine required 163 seconds with file parallelism disabled.
+
 ## Project layout
 
 ```

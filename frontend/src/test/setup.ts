@@ -4,7 +4,6 @@ import { cleanup, configure } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, vi } from "vitest";
 
 import "@/i18n";
-import { LANGUAGE_STORAGE_KEY } from "@/i18n";
 import { resetMockState } from "@/test/mocks/handlers";
 import { server, startMockServer } from "@/test/mocks/server";
 
@@ -71,10 +70,12 @@ beforeAll(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   if (typeof window !== "undefined") {
     window.history.replaceState({}, "", "/");
     try {
-      window.localStorage.removeItem(LANGUAGE_STORAGE_KEY);
+      window.localStorage.clear();
+      window.sessionStorage.clear();
     } catch {
       /* ignore */
     }
