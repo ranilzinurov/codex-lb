@@ -21,6 +21,11 @@
 учётные данные и проверяет доступность Docker daemon, buildx, Trivy и вход в
 GHCR во временном Docker config:
 
+Временный Docker config не копирует `auths` и credential store, но сохраняет
+пути к установленным CLI-плагинам. Если Docker работает через неосновной
+контекст, передайте его Unix-сокет через `DOCKER_HOST`, поскольку метаданные
+контекстов также не копируются.
+
 ```bash
 GITHUB_USER=<github-user> GITHUB_TOKEN=<packages-write-pat> \
   make release-local-dry-run RELEASE_SHA=<40-hex-sha>

@@ -9,6 +9,7 @@ from scripts.local_release import (
     GateResult,
     LocalReleaseError,
     ReleaseManifest,
+    _prepare_isolated_docker_config,
     buildx_command,
     detached_worktree,
     release_candidate,
@@ -117,6 +118,33 @@ def test_release_manifest_is_versioned_immutable_and_contains_no_credentials() -
     assert payload["ready"] is True
     assert "token" not in manifest.to_json().lower()
     assert "password" not in manifest.to_json().lower()
+
+
+def test_isolated_docker_config_keeps_plugins_without_credentials(tmp_path: Path, monkeypatch) -> None:
+    source = tmp_path / "source-config"
+    plugins = source / "cli-plugins"
+    extra = tmp_path / "extra-plugins"
+    target = tmp_path / "isolated"
+    plugins.mkdir(parents=True)
+    extra.mkdir()
+    target.mkdir()
+    (source / "config.json").write_text(
+        json.dumps(
+            {
+                "auths": {"ghcr.io": {"auth": "must-not-survive"}},
+                "credsStore": "desktop",
+                "cliPluginsExtraDirs": [str(extra)],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("DOCKER_CONFIG", str(source))
+
+    _prepare_isolated_docker_config(target)
+
+    payload = json.loads((target / "config.json").read_text(encoding="utf-8"))
+    assert payload == {"cliPluginsExtraDirs": [str(plugins), str(extra)]}
+    assert "must-not-survive" not in (target / "config.json").read_text(encoding="utf-8")
 
 
 def test_unpublished_sha_is_rejected_before_release(tmp_path: Path) -> None:

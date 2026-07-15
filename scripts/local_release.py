@@ -131,6 +131,28 @@ def _run(
     )
 
 
+def _prepare_isolated_docker_config(path: Path) -> None:
+    """Keep CLI plugin discovery while excluding credentials from Docker config."""
+
+    path.chmod(0o700)
+    source = Path(os.environ.get("DOCKER_CONFIG", Path.home() / ".docker")).expanduser()
+    plugin_directories: list[str] = []
+    default_plugins = source / "cli-plugins"
+    if default_plugins.is_dir():
+        plugin_directories.append(str(default_plugins.resolve()))
+    try:
+        source_config = json.loads((source / "config.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        source_config = {}
+    configured = source_config.get("cliPluginsExtraDirs") if isinstance(source_config, dict) else None
+    if isinstance(configured, list):
+        plugin_directories.extend(directory for directory in configured if isinstance(directory, str))
+    payload = {"cliPluginsExtraDirs": list(dict.fromkeys(plugin_directories))}
+    config_file = path / "config.json"
+    config_file.write_text(json.dumps(payload), encoding="utf-8")
+    config_file.chmod(0o600)
+
+
 def validate_published_sha(repository_root: Path, revision: str, remote: str) -> None:
     """Require an exact commit contained by a fetched branch of *remote*."""
 
@@ -228,7 +250,7 @@ def select_validation_target(repository_root: Path, revision: str, *, force_full
 def _diagnose_release_environment(repository_root: Path, username: str, token: str) -> None:
     with tempfile.TemporaryDirectory(prefix="codex-lb-dry-run-docker-config-") as docker_config:
         docker_config_path = Path(docker_config)
-        docker_config_path.chmod(0o700)
+        _prepare_isolated_docker_config(docker_config_path)
         environment = {**os.environ, "DOCKER_CONFIG": str(docker_config_path)}
         _run(("docker", "info"), cwd=repository_root, env=environment, capture_output=True)
         _run(("docker", "buildx", "version"), cwd=repository_root, env=environment, capture_output=True)
@@ -335,7 +357,7 @@ def release_candidate(
             tempfile.TemporaryDirectory(prefix="codex-lb-release-metadata-") as metadata_directory,
         ):
             docker_config_path = Path(docker_config)
-            docker_config_path.chmod(0o700)
+            _prepare_isolated_docker_config(docker_config_path)
             environment = {**os.environ, "DOCKER_CONFIG": str(docker_config_path)}
             _run(("make", validation_target), cwd=worktree)
             _run(
