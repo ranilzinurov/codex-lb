@@ -24,7 +24,7 @@ import time
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Callable, cast
 from urllib.error import URLError
 from urllib.parse import urlparse
 from urllib.request import urlopen
@@ -117,6 +117,30 @@ class DeploymentState:
             os.fchmod(temporary.fileno(), 0o600)
             temporary_path = Path(temporary.name)
         temporary_path.replace(path)
+
+
+@dataclass(frozen=True)
+class DoctorCheck:
+    name: str
+    status: str
+    detail: str
+
+
+@dataclass(frozen=True)
+class DoctorReport:
+    schema_version: int
+    checks: tuple[DoctorCheck, ...]
+
+    @property
+    def ok(self) -> bool:
+        return all(check.status == "passed" for check in self.checks)
+
+    def to_mapping(self) -> dict[str, object]:
+        return {
+            "schema_version": self.schema_version,
+            "ok": self.ok,
+            "checks": [asdict(check) for check in self.checks],
+        }
 
 
 @dataclass(frozen=True)
@@ -287,14 +311,84 @@ class SingleHostDeployment:
                 ) from exc
             self._run_locked()
 
+    def doctor(self) -> DoctorReport:
+        """Inspect deployment prerequisites without changing Docker or local state."""
+
+        checks: list[DoctorCheck] = []
+
+        def check(name: str, operation: Callable[[], str]) -> None:
+            try:
+                detail = operation()
+            except (DeploymentError, OSError) as exc:
+                checks.append(DoctorCheck(name=name, status="failed", detail=str(exc)))
+            else:
+                checks.append(DoctorCheck(name=name, status="passed", detail=detail))
+
+        check("docker", self._doctor_docker)
+        check("compose_config", self._doctor_compose)
+        check("registry", self._doctor_registry)
+        check("deployment_state", self._doctor_state)
+        check("disk_space", self._doctor_disk_space)
+        check("data_volume", self._doctor_data_volume)
+        check("backup_destination", self._doctor_backup_destination)
+        return DoctorReport(schema_version=1, checks=tuple(checks))
+
+    def _doctor_docker(self) -> str:
+        self._run_command(["docker", "info"], capture_output=True)
+        return "Docker daemon is available"
+
+    def _doctor_compose(self) -> str:
+        self._compose(self.candidate.image, "config", "-q")
+        return "Compose configuration is valid"
+
+    def _doctor_registry(self) -> str:
+        self._run_command(["docker", "manifest", "inspect", self.candidate.image], capture_output=True)
+        return "Candidate digest is reachable in the registry"
+
+    def _doctor_state(self) -> str:
+        state = DeploymentState.load(self.config.state_file)
+        running = self._running_image()
+        active = state.active.image if state.active else "none"
+        previous = state.previous.image if state.previous else "none"
+        running_image = running.image if running else "none"
+        return f"active={active} previous={previous} running={running_image}"
+
+    def _doctor_disk_space(self) -> str:
+        available_mb = self._available_space_mb()
+        if available_mb < self.config.min_free_space_mb:
+            raise DeploymentError(
+                f"insufficient free space: required={self.config.min_free_space_mb}MiB available={available_mb}MiB"
+            )
+        return f"required={self.config.min_free_space_mb}MiB available={available_mb}MiB"
+
+    def _doctor_data_volume(self) -> str:
+        result = self._run_command(
+            ["docker", "volume", "inspect", self.config.data_volume], check=False, capture_output=True
+        )
+        if result.returncode == 0:
+            return f"data volume {self.config.data_volume} is available"
+        state = DeploymentState.load(self.config.state_file)
+        if state.active is None:
+            return f"data volume {self.config.data_volume} will be created on first install"
+        raise DeploymentError(f"data volume {self.config.data_volume} is missing for an existing deployment")
+
+    def _doctor_backup_destination(self) -> str:
+        destination = self.config.backup_dir
+        existing = destination
+        while not existing.exists() and existing != existing.parent:
+            existing = existing.parent
+        if not existing.is_dir() or not os.access(existing, os.W_OK | os.X_OK):
+            raise DeploymentError(f"backup destination cannot be created under {existing}")
+        return f"backup destination can be created under {existing}"
+
     def _run_locked(self) -> None:
         self._compose(self.candidate.image, "config", "-q")
-        self._check_free_space()
+        state = DeploymentState.load(self.config.state_file)
+        running = self._running_image()
+        self._ensure_free_space(state, running)
         self._run_command(["docker", "pull", self.candidate.image])
         self._verify_candidate()
 
-        state = DeploymentState.load(self.config.state_file)
-        running = self._running_image()
         if state.active == self.candidate and running == self.candidate:
             self._wait_for_readiness(self.candidate)
             print(f"No-op: {self.candidate.image} is already healthy and active")
@@ -378,7 +472,7 @@ class SingleHostDeployment:
             raise DeploymentError(f"Command failed ({shlex.join(command)}){suffix}")
         return result
 
-    def _check_free_space(self) -> None:
+    def _available_space_mb(self) -> int:
         result = self._run_command(["df", "-Pm", str(self.config.state_dir)], capture_output=True)
         lines = result.stdout.splitlines()
         if len(lines) < 2:
@@ -390,6 +484,10 @@ class SingleHostDeployment:
             available_mb = int(fields[3])
         except ValueError as exc:
             raise DeploymentError(f"Cannot parse available disk space from df output: {lines[-1]!r}") from exc
+        return available_mb
+
+    def _check_free_space(self) -> None:
+        available_mb = self._available_space_mb()
         required_mb = self.config.min_free_space_mb
         print(f"Disk preflight: required={required_mb}MiB available={available_mb}MiB path={self.config.state_dir}")
         if available_mb < required_mb:
@@ -397,6 +495,38 @@ class SingleHostDeployment:
                 f"Insufficient free space before image pull: required={required_mb}MiB available={available_mb}MiB "
                 f"path={self.config.state_dir}"
             )
+
+    def _ensure_free_space(self, state: DeploymentState, running: KnownImage | None) -> None:
+        required_mb = self.config.min_free_space_mb
+        available_mb = self._available_space_mb()
+        print(f"Disk preflight: required={required_mb}MiB available={available_mb}MiB path={self.config.state_dir}")
+        if available_mb >= required_mb:
+            return
+
+        protected = {self.candidate.image}
+        protected.update(item.image for item in (running, state.active, state.previous) if item is not None)
+        for image in state.managed_images:
+            if image in protected:
+                continue
+            result = self._run_command(["docker", "image", "rm", image], check=False, capture_output=True)
+            if result.returncode != 0:
+                details = (result.stderr or result.stdout or "").strip()
+                print(f"Could not remove deployment-owned historical image {image}: {details}", file=sys.stderr)
+                continue
+            print(f"Removed deployment-owned historical image before pull: {image}")
+            available_mb = self._available_space_mb()
+            if available_mb >= required_mb:
+                print(
+                    f"Disk preflight after cleanup: required={required_mb}MiB available={available_mb}MiB "
+                    f"path={self.config.state_dir}"
+                )
+                return
+
+        available_mb = self._available_space_mb()
+        raise DeploymentError(
+            f"Insufficient free space before image pull after safe cleanup: required={required_mb}MiB "
+            f"available={available_mb}MiB path={self.config.state_dir}"
+        )
 
     def _inspect_image(self, image: str) -> dict[str, Any]:
         result = self._run_command(["docker", "image", "inspect", image], capture_output=True)
@@ -682,6 +812,7 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Deploy one verified codex-lb image digest to the single-host Compose setup."
     )
+    parser.add_argument("command", nargs="?", choices=("deploy", "doctor"), default="deploy")
     parser.add_argument(
         "--config", required=True, type=Path, help="Deployment control file; keep it outside the repository"
     )
@@ -689,6 +820,7 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
         "--image", required=True, help="Immutable image reference, e.g. ghcr.io/owner/codex-lb@sha256:..."
     )
     parser.add_argument("--revision", required=True, help="Git revision emitted by CI together with the image digest")
+    parser.add_argument("--json", action="store_true", help="emit a versioned JSON doctor report")
     return parser.parse_args(argv)
 
 
@@ -697,7 +829,17 @@ def main(argv: list[str] | None = None) -> int:
     try:
         candidate = parse_candidate(arguments.image, arguments.revision)
         config = DeploymentConfig.from_file(arguments.config.expanduser().resolve())
-        SingleHostDeployment(config, candidate).run()
+        deployment = SingleHostDeployment(config, candidate)
+        if arguments.command == "doctor":
+            report = deployment.doctor()
+            if arguments.json:
+                print(json.dumps(report.to_mapping(), indent=2, sort_keys=True))
+            else:
+                for check in report.checks:
+                    marker = "PASS" if check.status == "passed" else "FAIL"
+                    print(f"[{marker}] {check.name}: {check.detail}")
+            return 0 if report.ok else 1
+        deployment.run()
     except DeploymentError as exc:
         print(f"Deployment failed: {exc}", file=sys.stderr)
         return 1

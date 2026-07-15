@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sqlite3
 import sys
 from pathlib import Path
@@ -120,6 +121,112 @@ def test_disk_preflight_reports_and_rejects_insufficient_space(
     with pytest.raises(deploy.DeploymentError, match="required=2048MiB available=1000MiB"):
         deployment._check_free_space()
     assert "Disk preflight: required=2048MiB available=1000MiB" in capsys.readouterr().out
+
+
+def test_doctor_reports_checks_without_changing_server_state(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    with config.runtime_env_file.open("a", encoding="utf-8") as runtime:
+        runtime.write("OPENAI_API_KEY=must-not-appear\n")
+    candidate = _candidate()
+    deployment = deploy.SingleHostDeployment(config, candidate)
+    commands: list[list[str]] = []
+
+    def fake_run(command: list[str], **kwargs: object) -> CompletedProcess[str]:
+        commands.append(command)
+        if command[:2] == ["df", "-Pm"]:
+            output = "Filesystem 1048576-blocks Used Available Capacity Mounted on\n/dev/vda 10000 7000 3000 70% /\n"
+            return CompletedProcess(command, 0, output, "")
+        if command[:3] == ["docker", "container", "inspect"]:
+            return CompletedProcess(command, 1, "", "not found")
+        return CompletedProcess(command, 0, "[]", "")
+
+    deployment._run_command = fake_run  # type: ignore[method-assign]
+
+    report = deployment.doctor()
+    payload = report.to_mapping()
+
+    assert payload["schema_version"] == 1
+    assert payload["ok"] is True
+    assert {check["name"] for check in payload["checks"]} == {
+        "docker",
+        "compose_config",
+        "registry",
+        "deployment_state",
+        "disk_space",
+        "data_volume",
+        "backup_destination",
+    }
+    assert not config.state_dir.exists()
+    assert not config.backup_dir.exists()
+    assert "must-not-appear" not in json.dumps(payload)
+    mutating = {"pull", "stop", "up", "rm", "prune"}
+    assert all(not mutating.intersection(command) for command in commands)
+
+
+def test_low_space_cleanup_keeps_candidate_active_and_rollback_images(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    candidate = _candidate("a")
+    active = _candidate("b")
+    previous = _candidate("c")
+    historical = _candidate("d")
+    deployment = deploy.SingleHostDeployment(config, candidate)
+    available = iter((1000, 3000))
+    removed: list[str] = []
+
+    deployment._available_space_mb = lambda: next(available)  # type: ignore[method-assign]
+
+    def fake_run(command: list[str], **kwargs: object) -> CompletedProcess[str]:
+        del kwargs
+        if command[:3] == ["docker", "image", "rm"]:
+            removed.append(command[3])
+        return CompletedProcess(command, 0, "", "")
+
+    deployment._run_command = fake_run  # type: ignore[method-assign]
+    state = deploy.DeploymentState(
+        active=active,
+        previous=previous,
+        managed_images=(candidate.image, active.image, previous.image, historical.image),
+    )
+
+    deployment._ensure_free_space(state, active)
+
+    assert removed == [historical.image]
+
+
+def test_insufficient_space_after_safe_cleanup_fails_before_service_stop(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    config.state_dir.mkdir()
+    candidate = _candidate("a")
+    active = _candidate("b")
+    previous = _candidate("c")
+    historical = _candidate("d")
+    deploy.DeploymentState(
+        active=active,
+        previous=previous,
+        managed_images=(active.image, previous.image, historical.image),
+    ).write(config.state_file)
+    deployment = deploy.SingleHostDeployment(config, candidate)
+    compose_calls: list[tuple[str, tuple[str, ...]]] = []
+    commands: list[list[str]] = []
+    deployment._compose = lambda image, *args, **kwargs: compose_calls.append(  # type: ignore[method-assign]
+        (image, args)
+    )
+    deployment._running_image = lambda: active  # type: ignore[method-assign]
+    deployment._available_space_mb = lambda: 1000  # type: ignore[method-assign]
+
+    def fake_run(command: list[str], **kwargs: object) -> CompletedProcess[str]:
+        del kwargs
+        commands.append(command)
+        return CompletedProcess(command, 0, "", "")
+
+    deployment._run_command = fake_run  # type: ignore[method-assign]
+
+    with pytest.raises(deploy.DeploymentError, match="after safe cleanup"):
+        deployment._run_locked()
+
+    assert compose_calls == [(candidate.image, ("config", "-q"))]
+    assert ["docker", "image", "rm", historical.image] in commands
+    assert not any(command[:2] == ["docker", "pull"] for command in commands)
 
 
 def test_prune_keeps_active_and_one_previous_without_touching_foreign_images(tmp_path: Path) -> None:
