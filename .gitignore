@@ -21,6 +21,7 @@ __pycache__/
 build/
 dist/
 site/
+release-manifest-*.json
 app/static/
 deploy/helm/*/charts/
 

@@ -28,6 +28,8 @@ help:
 	  '  make test-integration-core   integration-core pytest slice' \
 	  '  make package                 build and verify sdist/wheel' \
 	  '  make fork-contract           fast contract for fork-owned behaviour' \
+	  '  make release-local-dry-run   validate a local GHCR release plan' \
+	  '  make release-local           publish linux/amd64 candidate to GHCR' \
 	  '  make ci-fast                 lint/type/frontend/unit/package' \
 	  '  make ci                      full local CI gate'
 
@@ -52,6 +54,17 @@ frontend-test-repeat: frontend-install
 
 frontend-build: frontend-install
 	cd frontend && bun run build
+
+RELEASE_SHA ?= $(shell git rev-parse HEAD)
+RELEASE_REPOSITORY ?= ghcr.io/ranilzinurov/codex-lb
+RELEASE_FLAGS ?=
+
+.PHONY: release-local release-local-dry-run
+release-local:
+	uv run python -m scripts.local_release --sha "$(RELEASE_SHA)" --repository "$(RELEASE_REPOSITORY)" $(RELEASE_FLAGS)
+
+release-local-dry-run:
+	uv run python -m scripts.local_release --sha "$(RELEASE_SHA)" --repository "$(RELEASE_REPOSITORY)" --dry-run $(RELEASE_FLAGS)
 
 .PHONY: lint typecheck architecture-check
 lint: architecture-check
