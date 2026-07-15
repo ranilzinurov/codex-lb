@@ -63,6 +63,7 @@ RELEASE_FLAGS ?=
 DEPLOY_HOST ?=
 DEPLOY_REMOTE_REPOSITORY ?=
 DEPLOY_REMOTE_CONFIG ?= /etc/codex-lb/deployment.env
+DEPLOY_REMOTE_PYTHON ?= python3
 RELEASE_DEPLOY_FLAGS ?=
 
 .PHONY: release-local release-local-dry-run release-deploy
@@ -77,7 +78,7 @@ release-deploy:
 	@test -n "$(DEPLOY_REMOTE_REPOSITORY)" || { echo "DEPLOY_REMOTE_REPOSITORY is required" >&2; exit 2; }
 	uv run python -m scripts.release_deploy --sha "$(RELEASE_SHA)" --repository "$(RELEASE_REPOSITORY)" \
 	  --host "$(DEPLOY_HOST)" --remote-repository "$(DEPLOY_REMOTE_REPOSITORY)" \
-	  --remote-config "$(DEPLOY_REMOTE_CONFIG)" $(RELEASE_DEPLOY_FLAGS)
+	  --remote-config "$(DEPLOY_REMOTE_CONFIG)" --remote-python "$(DEPLOY_REMOTE_PYTHON)" $(RELEASE_DEPLOY_FLAGS)
 
 .PHONY: lint typecheck architecture-check
 lint: architecture-check

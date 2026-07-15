@@ -70,6 +70,7 @@ def test_release_and_deploy_runs_release_doctor_deploy_verify_and_cleanup(tmp_pa
         target="deploy@example.test",
         remote_repository="/opt/codex-lb",
         remote_config="/etc/codex-lb/deployment.env",
+        remote_python="/home/deploy/.local/bin/python3.13",
         manifest_path=manifest,
         force_full=False,
         use_sudo=True,
@@ -79,6 +80,7 @@ def test_release_and_deploy_runs_release_doctor_deploy_verify_and_cleanup(tmp_pa
     assert Path(commands[0][0]).name.startswith("python")
     assert [command[0] for command in commands[1:]] == ["scp", "ssh", "ssh", "ssh", "ssh"]
     assert " doctor " in commands[2][-1]
+    assert "/home/deploy/.local/bin/python3.13 " in commands[2][-1]
     assert " deploy " in commands[3][-1]
     assert " doctor " in commands[4][-1]
     assert "rm -f " in commands[5][-1]
@@ -112,6 +114,7 @@ def test_release_and_deploy_cleans_remote_manifest_when_doctor_fails(tmp_path: P
             target="example.test",
             remote_repository="/opt/codex-lb",
             remote_config="/etc/codex-lb/deployment.env",
+            remote_python="python3",
             manifest_path=manifest,
             force_full=False,
             use_sudo=False,
@@ -143,3 +146,13 @@ def test_final_doctor_requires_digest_as_both_active_and_running() -> None:
 
     with pytest.raises(release_deploy.ReleaseDeployError, match="deployed digest"):
         release_deploy._doctor_payload(payload, expected, final=True)
+
+
+def test_remote_python_rejects_shell_metacharacters() -> None:
+    with pytest.raises(release_deploy.ReleaseDeployError, match="remote Python"):
+        release_deploy._validate_remote(
+            "example.test",
+            "/opt/codex-lb",
+            "/etc/codex-lb/deployment.env",
+            "python3;id",
+        )

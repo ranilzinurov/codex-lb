@@ -18,6 +18,7 @@ from scripts.local_release import DIGEST_PATTERN, REPOSITORY_PATTERN, SHA_PATTER
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 SSH_TARGET_PATTERN = re.compile(r"^(?:[A-Za-z0-9._-]+@)?[A-Za-z0-9._-]+$")
 REMOTE_PATH_PATTERN = re.compile(r"^/[A-Za-z0-9._/-]+$")
+REMOTE_EXECUTABLE_PATTERN = re.compile(r"^(?:/[A-Za-z0-9._/-]+|[A-Za-z0-9._-]+)$")
 
 
 class ReleaseDeployError(RuntimeError):
@@ -45,12 +46,14 @@ def _run(command: Sequence[str], *, capture_output: bool = False) -> subprocess.
     )
 
 
-def _validate_remote(target: str, repository: str, config: str) -> None:
+def _validate_remote(target: str, repository: str, config: str, python: str) -> None:
     if not SSH_TARGET_PATTERN.fullmatch(target):
         raise ReleaseDeployError("SSH target must be [user@]host without shell metacharacters")
     for label, path in (("remote repository", repository), ("remote config", config)):
         if not REMOTE_PATH_PATTERN.fullmatch(path) or ".." in Path(path).parts:
             raise ReleaseDeployError(f"{label} must be a simple absolute POSIX path")
+    if not REMOTE_EXECUTABLE_PATTERN.fullmatch(python) or ".." in Path(python).parts:
+        raise ReleaseDeployError("remote Python must be a command name or simple absolute POSIX path")
 
 
 def _ssh_command(target: str, arguments: Sequence[str]) -> tuple[str, ...]:
@@ -82,6 +85,7 @@ def release_and_deploy(
     target: str,
     remote_repository: str,
     remote_config: str,
+    remote_python: str,
     manifest_path: Path,
     force_full: bool,
     use_sudo: bool,
@@ -90,7 +94,7 @@ def release_and_deploy(
         raise ReleaseDeployError("revision must be a full lowercase Git SHA")
     if not REPOSITORY_PATTERN.fullmatch(image_repository):
         raise ReleaseDeployError("repository must be an untagged lowercase GHCR path")
-    _validate_remote(target, remote_repository, remote_config)
+    _validate_remote(target, remote_repository, remote_config, remote_python)
     manifest_path = manifest_path.expanduser().resolve()
     release_command = [
         sys.executable,
@@ -135,7 +139,7 @@ def release_and_deploy(
     remote_manifest = f"/tmp/codex-lb-release-{revision[:12]}.json"
     deploy_script = f"{remote_repository}/deploy/single-host/deploy.py"
     privilege = ["sudo"] if use_sudo else []
-    base = [*privilege, "python3", deploy_script]
+    base = [*privilege, remote_python, deploy_script]
     doctor = [*base, "doctor", "--config", remote_config, "--manifest", remote_manifest, "--json"]
     deploy = [*base, "deploy", "--config", remote_config, "--manifest", remote_manifest]
     cleanup = _ssh_command(target, [*privilege, "rm", "-f", remote_manifest])
@@ -168,6 +172,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--host", required=True, help="SSH target in [user@]host form")
     parser.add_argument("--remote-repository", required=True, help="absolute path to the repository checkout on host")
     parser.add_argument("--remote-config", default="/etc/codex-lb/deployment.env")
+    parser.add_argument("--remote-python", default="python3")
     parser.add_argument("--manifest", type=Path)
     parser.add_argument("--full", action="store_true")
     parser.add_argument("--sudo", action="store_true", help="run remote deploy and cleanup through sudo")
@@ -180,6 +185,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             target=args.host,
             remote_repository=args.remote_repository,
             remote_config=args.remote_config,
+            remote_python=args.remote_python,
             manifest_path=manifest,
             force_full=args.full,
             use_sudo=args.sudo,

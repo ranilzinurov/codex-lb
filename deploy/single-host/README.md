@@ -48,7 +48,9 @@ GITHUB_USER=<github-user> GITHUB_TOKEN=<packages-write-pat> \
 фактически запущенный digest. Временная серверная копия манифеста удаляется при
 любом исходе. Если оператору нужен `sudo`, добавьте
 `RELEASE_DEPLOY_FLAGS=--sudo`; путь к control-файлу задаётся через
-`DEPLOY_REMOTE_CONFIG`.
+`DEPLOY_REMOTE_CONFIG`. Если подходящий интерпретатор на сервере установлен не
+под именем `python3`, задайте его команду или абсолютный путь через
+`DEPLOY_REMOTE_PYTHON`; требуется Python 3.13 или новее.
 
 Команда автоматически выбирает `fork-contract` либо полный `make ci` по
 областям изменений выбранного коммита; `RELEASE_FLAGS=--full` принудительно
