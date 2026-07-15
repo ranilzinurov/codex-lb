@@ -138,6 +138,25 @@ def test_makefile_exposes_single_host_lifecycle_target() -> None:
     assert result.returncode == 0, result.stderr
 
 
+def test_makefile_exposes_release_deploy_operator_target() -> None:
+    result = subprocess.run(
+        [
+            "make",
+            "--dry-run",
+            "release-deploy",
+            "DEPLOY_HOST=deploy@example.test",
+            "DEPLOY_REMOTE_REPOSITORY=/opt/codex-lb",
+        ],
+        cwd=MAKEFILE.parent,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "scripts.release_deploy" in result.stdout
+
+
 @pytest.mark.parametrize(
     ("job_name", "scope_output"),
     (

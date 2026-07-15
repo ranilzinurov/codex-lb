@@ -198,7 +198,32 @@ volumes:
     return runtime, compose, control, state_dir
 
 
-def _deploy(command: str, config: Path, image: str, revision: str) -> subprocess.CompletedProcess[str]:
+def _write_release_manifest(path: Path, image: str, revision: str) -> None:
+    repository, digest = image.rsplit("@", 1)
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "repository": repository,
+                "revision": revision,
+                "digest": digest,
+                "image": image,
+                "platform": "linux/amd64",
+                "ready": True,
+                "gates": {
+                    "validation": {"status": "passed", "detail": "isolated lifecycle fixture"},
+                    "revision": {"status": "passed", "detail": "fixture OCI revision"},
+                    "security": {"status": "passed", "detail": "minimal isolated fixture"},
+                },
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _deploy(command: str, config: Path, manifest: Path) -> subprocess.CompletedProcess[str]:
     return _run(
         (
             sys.executable,
@@ -206,13 +231,11 @@ def _deploy(command: str, config: Path, image: str, revision: str) -> subprocess
             command,
             "--config",
             str(config),
-            "--image",
-            image,
-            "--revision",
-            revision,
+            "--manifest",
+            str(manifest),
             *(("--json",) if command == "doctor" else ()),
         ),
-        check=command != "deploy-failure",
+        environment={**os.environ, "CODEX_LB_TEST_ALLOW_LOOPBACK_MANIFEST": "1"},
         timeout=120,
     )
 
@@ -281,20 +304,26 @@ def run_lifecycle() -> dict[str, object]:
             bad_image, bad_tag = _build_candidate(registry, "unready", bad_revision, fail_ready=True)
             image_references.extend((first_image, second_image, bad_image))
             image_tags.extend((first_tag, second_tag, bad_tag))
+            first_manifest = root / "initial-release.json"
+            second_manifest = root / "next-release.json"
+            bad_manifest = root / "unready-release.json"
+            _write_release_manifest(first_manifest, first_image, first_revision)
+            _write_release_manifest(second_manifest, second_image, second_revision)
+            _write_release_manifest(bad_manifest, bad_image, bad_revision)
 
-            doctor = _deploy("doctor", control, first_image, first_revision)
+            doctor = _deploy("doctor", control, first_manifest)
             transcript.extend((doctor.stdout, doctor.stderr))
             doctor_payload = json.loads(doctor.stdout)
             if doctor_payload.get("ok") is not True:
                 raise LifecycleError(f"doctor rejected isolated fixture: {doctor.stdout}")
 
-            initial = _deploy("deploy", control, first_image, first_revision)
+            initial = _deploy("deploy", control, first_manifest)
             transcript.extend((initial.stdout, initial.stderr))
             initial_state = _service_state(service_port)
             if initial_state != {"accounts": 1, "api_keys": 1, "secret_hash": secret_hash, "version": "initial"}:
                 raise LifecycleError(f"unexpected initial state: {initial_state}")
 
-            update = _deploy("deploy", control, second_image, second_revision)
+            update = _deploy("deploy", control, second_manifest)
             transcript.extend((update.stdout, update.stderr))
             updated_state = _service_state(service_port)
             running_after_update = _run(
@@ -311,11 +340,10 @@ def run_lifecycle() -> dict[str, object]:
                     str(SCRIPT_DIR / "deploy.py"),
                     "--config",
                     str(control),
-                    "--image",
-                    bad_image,
-                    "--revision",
-                    bad_revision,
+                    "--manifest",
+                    str(bad_manifest),
                 ),
+                environment={**os.environ, "CODEX_LB_TEST_ALLOW_LOOPBACK_MANIFEST": "1"},
                 check=False,
                 timeout=120,
             )

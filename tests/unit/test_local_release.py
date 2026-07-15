@@ -12,6 +12,7 @@ from scripts.local_release import (
     buildx_command,
     detached_worktree,
     release_candidate,
+    select_validation_target,
     validate_published_sha,
 )
 
@@ -54,6 +55,8 @@ args = sys.argv[1:]
 if args[0] == "login":
     sys.stdin.read()
     (state / "docker-config.txt").write_text(os.environ["DOCKER_CONFIG"])
+elif args == ["info"] or args[:2] == ["buildx", "version"]:
+    pass
 elif args[:2] == ["buildx", "build"]:
     if os.environ.get("FAKE_DOCKER_FAIL_BUILD") == "1":
         raise SystemExit(42)
@@ -158,6 +161,22 @@ def test_buildx_command_publishes_one_amd64_candidate_with_reusable_cache(tmp_pa
     assert "type=local,dest=" + str(tmp_path / "cache-next") + ",mode=max" in command
 
 
+def test_merge_commit_always_selects_full_validation(tmp_path: Path) -> None:
+    repository, _remote, _revision = _repository_with_remote(tmp_path)
+    _git(repository, "checkout", "-qb", "topic")
+    (repository / "topic.txt").write_text("topic\n", encoding="utf-8")
+    _git(repository, "add", "topic.txt")
+    _git(repository, "commit", "-qm", "topic")
+    _git(repository, "checkout", "-q", "main")
+    (repository / "main.txt").write_text("main\n", encoding="utf-8")
+    _git(repository, "add", "main.txt")
+    _git(repository, "commit", "-qm", "main")
+    _git(repository, "merge", "--no-ff", "-qm", "merge topic", "topic")
+    revision = _git(repository, "rev-parse", "HEAD")
+
+    assert select_validation_target(repository, revision, force_full=False) == "ci"
+
+
 def test_release_candidate_scans_published_digest_once_and_cleans_credentials(tmp_path: Path, monkeypatch) -> None:
     repository, _remote, revision = _repository_with_remote(tmp_path)
     state_dir = _install_fake_release_tools(tmp_path, monkeypatch)
@@ -203,7 +222,11 @@ def test_dry_run_checks_release_plan_without_registry_mutation(tmp_path: Path, m
     assert isinstance(result, dict)
     assert result["mode"] == "dry-run"
     assert result["validation_target"] == "ci"
-    assert not any(state_dir.iterdir())
+    assert result["diagnostics"] == ["docker", "buildx", "trivy", "ghcr_auth"]
+    docker_config = Path((state_dir / "docker-config.txt").read_text())
+    assert not docker_config.exists()
+    assert (state_dir / "trivy-calls.txt").read_text().splitlines() == ["--version"]
+    assert not (tmp_path / "candidate.json").exists()
 
 
 def test_failed_build_cleans_worktree_and_temporary_docker_config(tmp_path: Path, monkeypatch) -> None:

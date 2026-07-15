@@ -77,7 +77,7 @@ def _normalise(value: object) -> object:
         return {"bytes": value.hex()}
     if value is None or isinstance(value, (str, int, float)):
         return value
-    return str(value)
+    raise TypeError(f"unsupported SQLite value type: {type(value).__name__}")
 
 
 def _database_fingerprint(database_path: Path) -> tuple[dict[str, int], dict[str, str]]:

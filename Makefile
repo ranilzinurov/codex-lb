@@ -31,6 +31,7 @@ help:
 	  '  make single-host-lifecycle-test  isolated deploy/update/rollback Docker test' \
 	  '  make release-local-dry-run   validate a local GHCR release plan' \
 	  '  make release-local           publish linux/amd64 candidate to GHCR' \
+	  '  make release-deploy          publish, diagnose, deploy, and verify over SSH' \
 	  '  make ci-fast                 lint/type/frontend/unit/package' \
 	  '  make ci                      full local CI gate'
 
@@ -59,13 +60,24 @@ frontend-build: frontend-install
 RELEASE_SHA ?= $(shell git rev-parse HEAD)
 RELEASE_REPOSITORY ?= ghcr.io/ranilzinurov/codex-lb
 RELEASE_FLAGS ?=
+DEPLOY_HOST ?=
+DEPLOY_REMOTE_REPOSITORY ?=
+DEPLOY_REMOTE_CONFIG ?= /etc/codex-lb/deployment.env
+RELEASE_DEPLOY_FLAGS ?=
 
-.PHONY: release-local release-local-dry-run
+.PHONY: release-local release-local-dry-run release-deploy
 release-local:
 	uv run python -m scripts.local_release --sha "$(RELEASE_SHA)" --repository "$(RELEASE_REPOSITORY)" $(RELEASE_FLAGS)
 
 release-local-dry-run:
 	uv run python -m scripts.local_release --sha "$(RELEASE_SHA)" --repository "$(RELEASE_REPOSITORY)" --dry-run $(RELEASE_FLAGS)
+
+release-deploy:
+	@test -n "$(DEPLOY_HOST)" || { echo "DEPLOY_HOST is required" >&2; exit 2; }
+	@test -n "$(DEPLOY_REMOTE_REPOSITORY)" || { echo "DEPLOY_REMOTE_REPOSITORY is required" >&2; exit 2; }
+	uv run python -m scripts.release_deploy --sha "$(RELEASE_SHA)" --repository "$(RELEASE_REPOSITORY)" \
+	  --host "$(DEPLOY_HOST)" --remote-repository "$(DEPLOY_REMOTE_REPOSITORY)" \
+	  --remote-config "$(DEPLOY_REMOTE_CONFIG)" $(RELEASE_DEPLOY_FLAGS)
 
 .PHONY: lint typecheck architecture-check
 lint: architecture-check
@@ -147,7 +159,7 @@ fork-contract: frontend-install
 
 .PHONY: single-host-lifecycle-test
 single-host-lifecycle-test:
-	python deploy/single-host/lifecycle_test.py --json
+	python3 deploy/single-host/lifecycle_test.py --json
 
 .PHONY: package
 package: frontend-build

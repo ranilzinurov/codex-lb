@@ -49,6 +49,7 @@ MANAGED_CONTAINER_LABEL = "com.codex-lb.single-host.managed=true"
 IMAGE_REFERENCE_PATTERN = re.compile(r"^.+@sha256:[0-9a-f]{64}$")
 REVISION_PATTERN = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 GHCR_REPOSITORY_PATTERN = re.compile(r"^ghcr\.io/[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._/-]*$")
+LOOPBACK_REPOSITORY_PATTERN = re.compile(r"^(?:127\.0\.0\.1|localhost):[0-9]{1,5}/[a-z0-9][a-z0-9._/-]*$")
 NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 ENV_KEY_PATTERN = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 EXPECTED_ENTRYPOINT = ["/app/scripts/docker-entrypoint.sh"]
@@ -151,9 +152,23 @@ class DoctorCheck:
 
 
 @dataclass(frozen=True)
+class DoctorDeploymentState:
+    active_image: str | None
+    previous_image: str | None
+    running_image: str | None
+
+    def detail(self) -> str:
+        return (
+            f"active={self.active_image or 'none'} previous={self.previous_image or 'none'} "
+            f"running={self.running_image or 'none'}"
+        )
+
+
+@dataclass(frozen=True)
 class DoctorReport:
     schema_version: int
     checks: tuple[DoctorCheck, ...]
+    deployment_state: DoctorDeploymentState | None
 
     @property
     def ok(self) -> bool:
@@ -164,6 +179,7 @@ class DoctorReport:
             "schema_version": self.schema_version,
             "ok": self.ok,
             "checks": [asdict(check) for check in self.checks],
+            "deployment_state": asdict(self.deployment_state) if self.deployment_state else None,
         }
 
 
@@ -322,7 +338,7 @@ def parse_candidate(image: str, revision: str) -> KnownImage:
     return KnownImage(image=image, revision=revision)
 
 
-def parse_release_manifest(path: Path) -> KnownImage:
+def parse_release_manifest(path: Path, *, allow_loopback: bool = False) -> KnownImage:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -339,7 +355,10 @@ def parse_release_manifest(path: Path) -> KnownImage:
     revision = raw.get("revision")
     if not isinstance(repository, str) or not isinstance(digest, str):
         raise DeploymentError("Release manifest repository and digest must be strings")
-    if not GHCR_REPOSITORY_PATTERN.fullmatch(repository):
+    repository_allowed = GHCR_REPOSITORY_PATTERN.fullmatch(repository) or (
+        allow_loopback and LOOPBACK_REPOSITORY_PATTERN.fullmatch(repository)
+    )
+    if not repository_allowed:
         raise DeploymentError("Release manifest repository must be an untagged lowercase GHCR path")
     if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
         raise DeploymentError("Release manifest digest must be a full lowercase sha256 digest")
@@ -392,11 +411,17 @@ class SingleHostDeployment:
         check("docker", self._doctor_docker)
         check("compose_config", self._doctor_compose)
         check("registry", self._doctor_registry)
-        check("deployment_state", self._doctor_state)
+        deployment_state: DoctorDeploymentState | None = None
+        try:
+            deployment_state = self._doctor_state()
+        except (DeploymentError, OSError) as exc:
+            checks.append(DoctorCheck(name="deployment_state", status="failed", detail=str(exc)))
+        else:
+            checks.append(DoctorCheck(name="deployment_state", status="passed", detail=deployment_state.detail()))
         check("disk_space", self._doctor_disk_space)
         check("data_volume", self._doctor_data_volume)
         check("backup_destination", self._doctor_backup_destination)
-        return DoctorReport(schema_version=1, checks=tuple(checks))
+        return DoctorReport(schema_version=1, checks=tuple(checks), deployment_state=deployment_state)
 
     def _doctor_docker(self) -> str:
         self._run_command(["docker", "info"], capture_output=True)
@@ -414,13 +439,14 @@ class SingleHostDeployment:
         self._run_command([*command, self.candidate.image], capture_output=True)
         return "Candidate digest is reachable in the registry"
 
-    def _doctor_state(self) -> str:
+    def _doctor_state(self) -> DoctorDeploymentState:
         state = DeploymentState.load(self.config.state_file)
         running = self._running_image()
-        active = state.active.image if state.active else "none"
-        previous = state.previous.image if state.previous else "none"
-        running_image = running.image if running else "none"
-        return f"active={active} previous={previous} running={running_image}"
+        return DoctorDeploymentState(
+            active_image=state.active.image if state.active else None,
+            previous_image=state.previous.image if state.previous else None,
+            running_image=running.image if running else None,
+        )
 
     def _doctor_disk_space(self) -> str:
         available_mb = self._available_space_mb()
@@ -967,9 +993,9 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--config", required=True, type=Path, help="Deployment control file; keep it outside the repository"
     )
-    parser.add_argument("--manifest", type=Path, help="ready release-manifest JSON from the local release command")
-    parser.add_argument("--image", help="immutable image reference for legacy/manual operation")
-    parser.add_argument("--revision", help="Git revision paired with --image")
+    parser.add_argument(
+        "--manifest", required=True, type=Path, help="ready release-manifest JSON from the local release command"
+    )
     parser.add_argument("--json", action="store_true", help="emit a versioned JSON doctor report")
     return parser.parse_args(argv)
 
@@ -977,14 +1003,8 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     arguments = parse_arguments(argv if argv is not None else sys.argv[1:])
     try:
-        if arguments.manifest is not None:
-            if arguments.image is not None or arguments.revision is not None:
-                raise DeploymentError("--manifest cannot be combined with --image or --revision")
-            candidate = parse_release_manifest(arguments.manifest.expanduser().resolve())
-        elif arguments.image is not None and arguments.revision is not None:
-            candidate = parse_candidate(arguments.image, arguments.revision)
-        else:
-            raise DeploymentError("provide --manifest or both --image and --revision")
+        allow_loopback = os.environ.get("CODEX_LB_TEST_ALLOW_LOOPBACK_MANIFEST") == "1"
+        candidate = parse_release_manifest(arguments.manifest.expanduser().resolve(), allow_loopback=allow_loopback)
         config = DeploymentConfig.from_file(arguments.config.expanduser().resolve())
         deployment = SingleHostDeployment(config, candidate)
         if arguments.command == "doctor":

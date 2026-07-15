@@ -8,6 +8,8 @@ from typing import Sequence
 PYTEST_TARGETS = (
     "tests/unit/test_ci_scope.py",
     "tests/unit/test_ci_workflow_required_checks.py",
+    "tests/unit/test_local_release.py",
+    "tests/unit/test_release_deploy.py",
     "tests/unit/test_single_host_deployment.py",
     "tests/unit/test_single_host_fingerprint.py",
     "tests/unit/test_upload_codex_usage.py",

@@ -17,7 +17,9 @@
 `origin`. Наличие незакоммиченных файлов в основной рабочей копии допустимо:
 сборка всегда получает отдельный чистый detached worktree и не видит эти файлы.
 
-Сначала проверьте план без сборки и публикации:
+Сначала проверьте план без сборки и публикации. Диагностика требует те же
+учётные данные и проверяет доступность Docker daemon, buildx, Trivy и вход в
+GHCR во временном Docker config:
 
 ```bash
 GITHUB_USER=<github-user> GITHUB_TOKEN=<packages-write-pat> \
@@ -31,6 +33,22 @@ GITHUB_USER=<github-user> GITHUB_TOKEN=<packages-write-pat> \
 GITHUB_USER=<github-user> GITHUB_TOKEN=<packages-write-pat> \
   make release-local RELEASE_SHA=<40-hex-sha>
 ```
+
+Для полного операторского потока по SSH задайте существующий checkout на
+сервере и выполните одну команду:
+
+```bash
+GITHUB_USER=<github-user> GITHUB_TOKEN=<packages-write-pat> \
+  make release-deploy RELEASE_SHA=<40-hex-sha> \
+  DEPLOY_HOST=<user@host> DEPLOY_REMOTE_REPOSITORY=/opt/codex-lb
+```
+
+Она публикует кандидат, передаёт на сервер только готовый манифест, выполняет
+`doctor`, deploy и повторный `doctor`, который подтверждает активный и
+фактически запущенный digest. Временная серверная копия манифеста удаляется при
+любом исходе. Если оператору нужен `sudo`, добавьте
+`RELEASE_DEPLOY_FLAGS=--sudo`; путь к control-файлу задаётся через
+`DEPLOY_REMOTE_CONFIG`.
 
 Команда автоматически выбирает `fork-contract` либо полный `make ci` по
 областям изменений выбранного коммита; `RELEASE_FLAGS=--full` принудительно
@@ -123,7 +141,10 @@ sudo ./deploy/single-host/deploy.py doctor \
 Для оркестратора добавьте `--json`. Версионированный отчёт
 `schema_version: 1` содержит отдельные статусы Docker, Compose, registry,
 deploy state, свободного места, data volume и каталога резервных копий. В нём
-нет значений из `runtime.env`. `doctor` не создаёт каталоги и lock/state-файлы,
+нет значений из `runtime.env`. Поле `deployment_state` отдельно передаёт
+`active_image`, `previous_image` и `running_image`, поэтому автоматизация
+сравнивает полные digest без разбора человекочитаемой строки. `doctor` не
+создаёт каталоги и lock/state-файлы,
 не загружает и не удаляет образы, не останавливает и не запускает контейнеры.
 Ненулевой код означает, что развёртывание начинать нельзя.
 
@@ -140,9 +161,9 @@ sudo ./deploy/single-host/deploy.py \
   --manifest /path/to/release-manifest-<sha-prefix>.json
 ```
 
-Для ручного аварийного запуска сохраняется форма
-`--image <repository@digest> --revision <full-sha>`; тег без digest отклоняется
-до остановки сервиса.
+Deploy всегда требует готовый release manifest. Для аварийного возврата
+используйте сохранённый манифест соответствующего известного digest; прямой
+обход ворот через пару `--image/--revision` не поддерживается.
 
 Команда сначала запускает `docker compose config -q`, проверяет защищённость
 файла секретов и выводит отчёт вида `required=…MiB available=…MiB` до любого
@@ -203,7 +224,8 @@ sudo docker run --rm --entrypoint python \
   -c 'import pathlib, shutil; target=pathlib.Path("/var/lib/codex-lb/store.db"); [pathlib.Path(str(target) + suffix).unlink(missing_ok=True) for suffix in ("", "-wal", "-shm")]; shutil.copy2("/backup/codex-lb-deploy-<timestamp>.sqlite", target)'
 ```
 
-После восстановления снова запустите `deploy.py` с нужным известным digest.
+После восстановления снова запустите `deploy.py` с сохранённым готовым
+манифестом нужного известного digest.
 
 ## Изолированная проверка жизненного цикла
 

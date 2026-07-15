@@ -155,6 +155,7 @@ make lint
 make test-unit
 make fork-contract
 make single-host-lifecycle-test
+make release-deploy DEPLOY_HOST=<user@host> DEPLOY_REMOTE_REPOSITORY=/opt/codex-lb
 make package
 ```
 

@@ -111,6 +111,50 @@ def test_release_manifest_requires_ready_digest_and_matching_revision(tmp_path: 
         deploy.parse_release_manifest(manifest)
 
 
+def test_loopback_release_manifest_requires_explicit_test_mode(tmp_path: Path) -> None:
+    revision = "b" * 40
+    digest = "sha256:" + "a" * 64
+    repository = "127.0.0.1:5000/codex-lb"
+    manifest = tmp_path / "candidate.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "repository": repository,
+                "revision": revision,
+                "digest": digest,
+                "image": f"{repository}@{digest}",
+                "platform": "linux/amd64",
+                "ready": True,
+                "gates": {
+                    "validation": {"status": "passed"},
+                    "revision": {"status": "passed"},
+                    "security": {"status": "passed"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(deploy.DeploymentError, match="GHCR"):
+        deploy.parse_release_manifest(manifest)
+    assert deploy.parse_release_manifest(manifest, allow_loopback=True).image == f"{repository}@{digest}"
+
+
+def test_deploy_cli_requires_release_manifest(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit):
+        deploy.parse_arguments(
+            [
+                "--config",
+                str(tmp_path / "deployment.env"),
+                "--image",
+                _candidate().image,
+                "--revision",
+                _candidate().revision,
+            ]
+        )
+
+
 def test_runtime_environment_must_not_be_group_or_world_readable(tmp_path: Path) -> None:
     runtime = tmp_path / "runtime.env"
     _write_runtime_environment(runtime, 0o644)
@@ -221,6 +265,11 @@ def test_doctor_reports_checks_without_changing_server_state(tmp_path: Path) -> 
 
     assert payload["schema_version"] == 1
     assert payload["ok"] is True
+    assert payload["deployment_state"] == {
+        "active_image": None,
+        "previous_image": None,
+        "running_image": None,
+    }
     assert {check["name"] for check in payload["checks"]} == {
         "docker",
         "compose_config",

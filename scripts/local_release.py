@@ -207,8 +207,15 @@ def buildx_command(
     return tuple(command)
 
 
-def _validation_target(repository_root: Path, revision: str, *, force_full: bool) -> str:
+def select_validation_target(repository_root: Path, revision: str, *, force_full: bool) -> str:
     if force_full:
+        return "ci"
+    parents = _run(
+        ("git", "rev-list", "--parents", "--max-count=1", revision),
+        cwd=repository_root,
+        capture_output=True,
+    ).stdout.split()
+    if len(parents) > 2:
         return "ci"
     changed = _run(
         ("git", "diff-tree", "--root", "--no-commit-id", "--name-only", "-r", revision),
@@ -216,6 +223,23 @@ def _validation_target(repository_root: Path, revision: str, *, force_full: bool
         capture_output=True,
     ).stdout.splitlines()
     return "ci" if classify_paths(changed).level == "full" else "fork-contract"
+
+
+def _diagnose_release_environment(repository_root: Path, username: str, token: str) -> None:
+    with tempfile.TemporaryDirectory(prefix="codex-lb-dry-run-docker-config-") as docker_config:
+        docker_config_path = Path(docker_config)
+        docker_config_path.chmod(0o700)
+        environment = {**os.environ, "DOCKER_CONFIG": str(docker_config_path)}
+        _run(("docker", "info"), cwd=repository_root, env=environment, capture_output=True)
+        _run(("docker", "buildx", "version"), cwd=repository_root, env=environment, capture_output=True)
+        _run(("trivy", "--version"), cwd=repository_root, env=environment, capture_output=True)
+        _run(
+            ("docker", "login", "ghcr.io", "--username", username, "--password-stdin"),
+            cwd=repository_root,
+            env=environment,
+            input_text=token,
+            capture_output=True,
+        )
 
 
 def _require_programs(programs: Sequence[str]) -> None:
@@ -282,8 +306,13 @@ def release_candidate(
     validate_repository(image_repository)
     validate_published_sha(repository_root, revision, remote)
     _require_programs(("docker", "trivy", "make"))
-    validation_target = _validation_target(repository_root, revision, force_full=force_full)
+    username = os.environ.get("GITHUB_USER", "").strip()
+    token = os.environ.get("GITHUB_TOKEN", "")
+    if not username or not token:
+        raise LocalReleaseError("GITHUB_USER and GITHUB_TOKEN are required for GHCR publication")
+    validation_target = select_validation_target(repository_root, revision, force_full=force_full)
     if dry_run:
+        _diagnose_release_environment(repository_root, username, token)
         return {
             "schema_version": SCHEMA_VERSION,
             "mode": "dry-run",
@@ -291,13 +320,9 @@ def release_candidate(
             "revision": revision,
             "platform": PLATFORM,
             "validation_target": validation_target,
+            "diagnostics": ["docker", "buildx", "trivy", "ghcr_auth"],
             "ready": False,
         }
-
-    username = os.environ.get("GITHUB_USER", "").strip()
-    token = os.environ.get("GITHUB_TOKEN", "")
-    if not username or not token:
-        raise LocalReleaseError("GITHUB_USER and GITHUB_TOKEN are required for GHCR publication")
 
     cache_path = cache_path.expanduser().resolve()
     cache_path.parent.mkdir(parents=True, exist_ok=True)
