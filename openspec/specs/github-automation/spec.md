@@ -27,6 +27,13 @@ The `Codex review labels` workflow MUST execute the label synchronization script
 - **AND** it falls back to `RELEASE_PLEASE_TOKEN` before `github.token`
 - **AND** it checks out the default branch with persisted checkout credentials disabled
 
+#### Scenario: Scheduled synchronization finds no open pull requests
+
+- **GIVEN** the scheduled synchronization runs with `--all-open`
+- **WHEN** GitHub returns an empty open pull-request selection
+- **THEN** the synchronization completes successfully without classifying or writing any pull request
+- **AND** a failure to read the open pull-request selection remains an error
+
 ### Requirement: Codex review label sync write-denial resilience
 
 The Codex label synchronization script MUST distinguish GitHub write-permission denials from classification/read failures.
@@ -201,4 +208,3 @@ for a subsystem is unrelated to the change.
 - **WHEN** the CI workflow runs
 - **THEN** each required pytest matrix check context runs its corresponding `make test-*` target
 - **AND** the placeholder step is skipped
-
