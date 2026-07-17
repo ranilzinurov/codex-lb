@@ -34,6 +34,12 @@ The `Codex review labels` workflow MUST execute the label synchronization script
 - **THEN** the synchronization completes successfully without classifying or writing any pull request
 - **AND** a failure to read the open pull-request selection remains an error
 
+#### Scenario: Manual synchronization is dispatched on demand
+
+- **WHEN** the `Codex review labels` workflow is manually dispatched from the default branch
+- **THEN** the all-open synchronization job runs with `--all-open`
+- **AND** the per-PR synchronization job remains skipped because no individual PR was selected
+
 ### Requirement: Codex review label sync retries transient GitHub read failures
 
 The Codex label synchronization script MUST retry read-only GitHub API calls

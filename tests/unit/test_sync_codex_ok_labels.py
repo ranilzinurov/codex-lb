@@ -486,6 +486,8 @@ def test_workflow_prefers_privileged_token_and_enables_tolerant_apply() -> None:
     assert "pull_request_review_thread:" not in workflow
     assert "github.event_name == 'pull_request_review_thread'" not in workflow
     assert 'cron: "*/15 * * * *"' in workflow
+    assert "workflow_dispatch:" in workflow
+    assert "github.event_name == 'workflow_dispatch'" in workflow
     assert workflow.count("--tolerate-write-permission-errors") == 2
     assert workflow.count("--tolerate-read-errors") == 1
 

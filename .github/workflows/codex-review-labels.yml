@@ -12,6 +12,7 @@ on:
     types: [submitted, edited, dismissed]
   schedule:
     - cron: "*/15 * * * *"
+  workflow_dispatch:
 
 permissions:
   actions: write
@@ -77,6 +78,7 @@ jobs:
     if: >-
       ${{
         github.event_name == 'schedule' ||
+        github.event_name == 'workflow_dispatch' ||
         (
           github.event_name == 'workflow_run' &&
           github.event.workflow_run.event == 'pull_request'
