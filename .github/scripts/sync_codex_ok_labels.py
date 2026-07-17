@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote
@@ -170,6 +171,8 @@ class GhError(RuntimeError):
 
 
 _RATE_LIMIT_MARKER = "API rate limit exceeded"
+_TRANSIENT_HTTP_ERROR_RE = re.compile(r"\bHTTP\s+(?:502|503|504)\b", re.IGNORECASE)
+_TRANSIENT_HTTP_RETRY_DELAYS_SECONDS = (1, 2)
 _fallback_token_active = False
 
 
@@ -212,30 +215,60 @@ class SyncDecision:
     approve_workflow_run_ids: tuple[int, ...]
 
 
-def run_gh(args: list[str], *, input_json: Any | None = None, timeout_seconds: int = 30) -> Any:
+def run_gh(
+    args: list[str],
+    *,
+    input_json: Any | None = None,
+    timeout_seconds: int = 30,
+    retry_transient: bool = True,
+) -> Any:
     command = ["gh", *args]
     input_text = json.dumps(input_json) if input_json is not None else None
-    try:
-        proc = subprocess.run(
-            command,
-            check=False,
-            input=input_text,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=timeout_seconds,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise GhError(f"{' '.join(command)}: timed out after {timeout_seconds}s") from exc
+    retry_attempt = 0
+    while True:
+        try:
+            proc = subprocess.run(
+                command,
+                check=False,
+                input=input_text,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=timeout_seconds,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise GhError(f"{' '.join(command)}: timed out after {timeout_seconds}s") from exc
 
-    if proc.returncode != 0:
+        if proc.returncode == 0:
+            break
+
         detail = proc.stderr.strip() or proc.stdout.strip()
         if _RATE_LIMIT_MARKER in detail and _activate_fallback_token():
             print(
                 "warning: active token rate-limited; retrying with GH_FALLBACK_TOKEN",
                 file=sys.stderr,
             )
-            return run_gh(args, input_json=input_json, timeout_seconds=timeout_seconds)
+            return run_gh(
+                args,
+                input_json=input_json,
+                timeout_seconds=timeout_seconds,
+                retry_transient=retry_transient,
+            )
+
+        if (
+            retry_transient
+            and _TRANSIENT_HTTP_ERROR_RE.search(detail)
+            and retry_attempt < len(_TRANSIENT_HTTP_RETRY_DELAYS_SECONDS)
+        ):
+            delay = _TRANSIENT_HTTP_RETRY_DELAYS_SECONDS[retry_attempt]
+            retry_attempt += 1
+            print(
+                f"warning: transient GitHub API error ({detail}); retrying in {delay}s",
+                file=sys.stderr,
+            )
+            time.sleep(delay)
+            continue
+
         raise GhError(f"{' '.join(command)}: {detail}")
 
     text = proc.stdout.strip()
@@ -252,7 +285,7 @@ def gh_api(path: str, *, method: str = "GET", input_json: Any | None = None) -> 
     if input_json is not None:
         args.append("--input")
         args.append("-")
-    return run_gh(args, input_json=input_json)
+    return run_gh(args, input_json=input_json, retry_transient=method.upper() == "GET")
 
 
 def graphql(query: str, **fields: object) -> dict[str, Any]:
@@ -1026,7 +1059,7 @@ def run_gh_write(
     action: str,
 ) -> str | None:
     try:
-        run_gh(args, timeout_seconds=timeout_seconds)
+        run_gh(args, timeout_seconds=timeout_seconds, retry_transient=False)
     except GhError as exc:
         if tolerate_permission_errors and is_github_app_write_denial(exc):
             return write_warning(action, exc)

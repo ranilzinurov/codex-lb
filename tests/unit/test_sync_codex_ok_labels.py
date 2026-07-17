@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import time
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -868,6 +869,15 @@ def _rate_limited_proc() -> Any:
     return _Proc()
 
 
+def _http_error_proc(status: int) -> Any:
+    class _Proc:
+        returncode = 1
+        stdout = ""
+        stderr = f"gh: HTTP {status}"
+
+    return _Proc()
+
+
 def _ok_proc(payload: str = "{}") -> Any:
     class _Proc:
         returncode = 0
@@ -920,3 +930,66 @@ def test_run_gh_fails_when_fallback_token_is_also_exhausted(monkeypatch: pytest.
 
     with pytest.raises(module.GhError):
         module.run_gh(["api", "/rate-limited-path"])
+
+
+@pytest.mark.parametrize("status", [502, 503, 504])
+def test_run_gh_retries_transient_http_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    status: int,
+) -> None:
+    module = load_sync_module()
+    calls = 0
+    retry_delays: list[int] = []
+
+    def fake_run(command: Any, **kwargs: Any) -> Any:
+        nonlocal calls
+        calls += 1
+        return _http_error_proc(status) if calls == 1 else _ok_proc()
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    monkeypatch.setattr(time, "sleep", retry_delays.append)
+
+    assert module.gh_api("/transient-path") == {}
+    assert calls == 2
+    assert retry_delays == [1]
+
+
+def test_run_gh_fails_after_transient_http_retry_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = load_sync_module()
+    calls = 0
+    retry_delays: list[int] = []
+
+    def fake_run(command: Any, **kwargs: Any) -> Any:
+        nonlocal calls
+        calls += 1
+        return _http_error_proc(503)
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    monkeypatch.setattr(time, "sleep", retry_delays.append)
+
+    with pytest.raises(module.GhError, match="HTTP 503"):
+        module.gh_api("/transient-path")
+
+    assert calls == 3
+    assert retry_delays == [1, 2]
+
+
+def test_gh_api_does_not_retry_mutation_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = load_sync_module()
+    calls = 0
+
+    def fake_run(command: Any, **kwargs: Any) -> Any:
+        nonlocal calls
+        calls += 1
+        return _http_error_proc(503)
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    with pytest.raises(module.GhError, match="HTTP 503"):
+        module.gh_api(
+            "/repos/Soju06/codex-lb/issues/714/labels",
+            method="POST",
+            input_json={"labels": ["🤖 codex: ok"]},
+        )
+
+    assert calls == 1
